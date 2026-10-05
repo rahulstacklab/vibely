@@ -1,13 +1,12 @@
-import React, { useState, useEffect, useContext, createContext, useRef, useMemo } from 'react';
+/* eslint-disable no-unused-vars */
+import { useState, useEffect, useContext, createContext, useRef } from 'react';
 import {
-  Home, MessageCircle, Users, User, Settings, Shield, Search, Plus, 
-  Image as ImageIcon, Mic, Send, Smile, Paperclip, MoreVertical, Phone, Video, 
-  Check, CheckCheck, Sun, Moon, LogOut, Bell, ChevronLeft, Heart, ThumbsUp, 
-  Activity, BarChart2, X, Play, Pause, Hash, Lock, Coffee, Laptop, Plane, Flame,
-  Menu, Sparkles, MapPin, FileText, Music, Download, Share2, Trash2, Edit3,
-  Filter, Globe, Clock, Sliders, Volume2, VolumeX, Maximize2, Eye, Zap, Award,
-  CheckCircle2, AlertCircle, ArrowRight, CornerDownRight, Bookmark, Archive,
-  UserPlus, Radio, ShieldAlert, PhoneOff, MicOff, VideoOff, RefreshCw
+  Home, MessageCircle, Users, User, Settings, Shield, Search, Plus,
+  Mic, Send, Smile, Paperclip, MoreVertical, Phone, Video,
+  CheckCheck, Sun, Moon, LogOut, Bell, ChevronLeft, Heart,
+  Activity, X, Play, Pause, Lock, Coffee, Laptop, Flame,
+  Sparkles, Filter, Globe, Sliders, Bookmark,
+  ShieldAlert, PhoneOff, MicOff, VideoOff
 } from 'lucide-react';
 
 const DEMO_ACCOUNTS = [
@@ -617,12 +616,9 @@ const BottomNav = () => {
 const CompassIcon = ({ size, className }) => <Globe size={size} className={className} />;
 
 const DashboardView = () => {
-  const { stories, chats, moments } = useContext(DataContext);
+  const { stories, chats } = useContext(DataContext);
   const { navigate } = useContext(RouterContext);
-  const { user } = useContext(AuthContext);
-  const [activeMoodFilter, setActiveMoodFilter] = useState('All');
-
-  const moods = ['All', 'Happy', 'Focused', 'Chill', 'Excited', 'Exploring'];
+  const { user, setUser } = useContext(AuthContext);
 
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-900 pb-24 md:pb-8">
@@ -725,7 +721,7 @@ const DashboardView = () => {
                 <button 
                   key={idx}
                   onClick={() => {
-                    user.vibe = vibe;
+                    setUser(prev => prev ? { ...prev, vibe } : prev);
                     navigate('/');
                   }}
                   className="bg-white/10 hover:bg-white/25 backdrop-blur-md px-3 py-1.5 rounded-2xl text-xs font-semibold transition-all border border-white/20"
@@ -1096,7 +1092,7 @@ const ChatView = () => {
 
 const StoriesView = () => {
   const { stories } = useContext(DataContext);
-  const { navigate, routeParams } = useContext(RouterContext);
+  const { navigate } = useContext(RouterContext);
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const activeStory = stories[currentIndex] || stories[0];
@@ -1282,7 +1278,6 @@ const MomentsView = () => {
 };
 
 const DiscoverView = () => {
-  const { navigate } = useContext(RouterContext);
   const { showToast } = useContext(DataContext);
 
   return (
