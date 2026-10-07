@@ -33,6 +33,21 @@ Vercel serves the Vite frontend and the serverless signing endpoint at `/api/clo
 
 Redeploy the project after adding the variables. Do not put the Cloudinary API secret in frontend code or a committed file: Vite bundles frontend code for browsers, where embedded secrets are public.
 
+## Cloudflare Workers deployment
+
+The `workers.dev` site uses `worker.js` for `/api/cloudinary/signature` and serves the built Vite files from `dist`. Configure the Cloudinary values as Worker secrets, then build and deploy from the repository root:
+
+```sh
+npx wrangler secret put CLOUDINARY_CLOUD_NAME
+npx wrangler secret put CLOUDINARY_API_KEY
+npx wrangler secret put CLOUDINARY_API_SECRET
+npx wrangler secret put FIREBASE_PROJECT_ID
+npm run build
+npx wrangler deploy
+```
+
+Wrangler prompts for each secret value; they are stored server-side and are not included in the static assets. The `wrangler.jsonc` configuration targets the `vibely` Worker and routes the signing endpoint through the Worker. Deploying this Worker configuration is required for the `/api/cloudinary/signature` route to work on `https://vibely.rahulkumar143221.workers.dev/`.
+
 ## Cloudflare Pages deployment
 
 This repository includes a Cloudflare Pages Function at `functions/api/cloudinary/signature.js`. Cloudflare Pages deploys it at `/api/cloudinary/signature` alongside the static Vite frontend, so no separate Node upload service or `VITE_UPLOAD_API_URL` is needed.
