@@ -963,19 +963,64 @@ const Sidebar = () => {
 
 const BottomNav = () => {
   const { currentRoute, navigate } = useContext(RouterContext);
-  const { user } = useContext(AuthContext);
+  const { user, logout } = useContext(AuthContext);
+  const { isDark, toggleTheme } = useContext(ThemeContext);
+  const [showMore, setShowMore] = useState(false);
 
   const navItems = [
-    { id: '/', icon: Home },
-    { id: '/chats', icon: MessageCircle, badge: true },
-    { id: '/circles', icon: Users },
-    { id: '/moments', icon: Sparkles },
-    { id: '/profile', icon: User, avatar: user?.avatar }
+    { id: '/', icon: Home, label: 'Home' },
+    { id: '/chats', icon: MessageCircle, label: 'Chats', badge: true },
+    { id: '/circles', icon: Users, label: 'Circles' },
+    { id: '/moments', icon: Sparkles, label: 'Moments' },
+    { id: '/profile', icon: User, label: 'Profile', avatar: user?.avatar }
+  ];
+  const moreItems = [
+    { id: '/discover', icon: Globe, label: 'Discover' },
+    { id: '/saved', icon: Bookmark, label: 'Saved messages' },
+    { id: '/settings', icon: Settings, label: 'Settings' },
+    ...(user?.role === 'admin' ? [{ id: '/admin', icon: Shield, label: 'Admin panel' }] : [])
   ];
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-950/90 backdrop-blur-xl border-t border-slate-200/80 dark:border-slate-800/80 pb-safe z-40">
-      <div className="flex items-center justify-around py-2 px-1">
+    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200/80 dark:border-slate-800/80 pb-safe z-40">
+      {showMore && (
+        <div className="absolute bottom-full right-2 mb-2 w-60 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-800 dark:bg-slate-950">
+          {moreItems.map(({ id, icon: Icon, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => {
+                navigate(id);
+                setShowMore(false);
+              }}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium text-slate-700 hover:bg-violet-50 hover:text-violet-700 dark:text-slate-200 dark:hover:bg-violet-950/50 dark:hover:text-violet-300"
+            >
+              <Icon size={19} />
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => {
+              toggleTheme();
+              setShowMore(false);
+            }}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium text-slate-700 hover:bg-violet-50 dark:text-slate-200 dark:hover:bg-violet-950/50"
+          >
+            {isDark ? <Sun size={19} /> : <Moon size={19} />}
+            {isDark ? 'Light theme' : 'Dark theme'}
+          </button>
+          <button
+            type="button"
+            onClick={logout}
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+          >
+            <LogOut size={19} />
+            Log out
+          </button>
+        </div>
+      )}
+      <div className="flex items-center justify-around gap-1 px-1 pt-1.5 pb-1">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = currentRoute === item.id || (currentRoute.startsWith(item.id) && item.id !== '/');
@@ -983,7 +1028,8 @@ const BottomNav = () => {
             <button
               key={item.id}
               onClick={() => navigate(item.id)}
-              className="p-2.5 relative rounded-2xl transition-transform active:scale-90"
+              aria-label={item.label}
+              className="relative flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-transform active:scale-90"
             >
               {item.avatar ? (
                 <div className={`rounded-full p-0.5 transition-all ${isActive ? 'ring-2 ring-violet-500 scale-105' : ''}`}>
@@ -991,17 +1037,30 @@ const BottomNav = () => {
                 </div>
               ) : (
                 <Icon 
-                  size={22} 
-                  className={isActive ? 'text-violet-600 dark:text-violet-400 scale-110' : 'text-slate-400 dark:text-slate-500'} 
+                  size={21}
+                  className={isActive ? 'text-violet-600 dark:text-violet-400' : 'text-slate-400 dark:text-slate-500'}
                   strokeWidth={isActive ? 2.5 : 2}
                 />
               )}
+              <span className={`max-w-full truncate text-[10px] leading-tight ${isActive ? 'font-semibold text-violet-600 dark:text-violet-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                {item.label}
+              </span>
               {item.badge && (
-                <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full"></span>
+                <span className="absolute top-1 right-[calc(50%-15px)] h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white dark:ring-slate-950"></span>
               )}
             </button>
           );
         })}
+        <button
+          type="button"
+          aria-label="More navigation options"
+          aria-expanded={showMore}
+          onClick={() => setShowMore(value => !value)}
+          className="flex min-w-0 flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1.5 transition-colors hover:bg-slate-100 dark:hover:bg-slate-900"
+        >
+          <MoreVertical size={21} className={showMore ? 'text-violet-600 dark:text-violet-400' : 'text-slate-400 dark:text-slate-500'} />
+          <span className={`text-[10px] leading-tight ${showMore ? 'font-semibold text-violet-600 dark:text-violet-400' : 'text-slate-500 dark:text-slate-400'}`}>More</span>
+        </button>
       </div>
     </div>
   );
@@ -2491,7 +2550,7 @@ const MainAppLayout = () => {
   };
 
   return (
-    <div className="flex h-screen pl-16 bg-slate-50 dark:bg-slate-900 overflow-hidden font-sans">
+    <div className="flex h-screen md:pl-16 bg-slate-50 dark:bg-slate-900 overflow-hidden font-sans">
       <Toast message={toastMessage} />
       <Sidebar />
       <div className="flex min-w-0 flex-1">
