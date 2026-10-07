@@ -9,6 +9,7 @@ const {
   CLOUDINARY_API_KEY,
   CLOUDINARY_API_SECRET,
   FIREBASE_PROJECT_ID = 'vibely-app-68415',
+  APP_ORIGIN = '',
   API_PORT = process.env.PORT || '3001'
 } = process.env;
 
@@ -23,12 +24,30 @@ for (const [name, value] of Object.entries({
 const secureTokenKeys = createRemoteJWKSet(
   new URL('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com')
 );
+const allowedOrigins = new Set(APP_ORIGIN.split(',').map(origin => origin.trim()).filter(Boolean));
 const safeId = /^[A-Za-z0-9_-]{1,128}$/;
 const maximumRequestBytes = 12 * 1024;
 const server = createServer(async (request, response) => {
   response.setHeader('Content-Type', 'application/json; charset=utf-8');
   response.setHeader('Cache-Control', 'no-store');
   response.setHeader('X-Content-Type-Options', 'nosniff');
+
+  const origin = request.headers.origin;
+  if (origin && allowedOrigins.has(origin)) {
+    response.setHeader('Access-Control-Allow-Origin', origin);
+    response.setHeader('Vary', 'Origin');
+    response.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  }
+
+  if (request.method === 'OPTIONS' && request.url === '/api/cloudinary/signature') {
+    if (origin && !allowedOrigins.has(origin)) {
+      response.writeHead(403).end(JSON.stringify({ error: 'This site is not allowed to request upload signatures.' }));
+      return;
+    }
+    response.writeHead(204).end();
+    return;
+  }
 
   if (request.method !== 'POST' || request.url !== '/api/cloudinary/signature') {
     response.writeHead(404).end(JSON.stringify({ error: 'Not found.' }));

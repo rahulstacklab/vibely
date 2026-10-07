@@ -20,4 +20,17 @@ Vibely is a React and Vite chat app backed by Firebase Authentication and Cloud 
    npm run dev
    ```
 
-The Cloudinary API secret stays server-side. The upload API verifies Firebase ID tokens and verifies the user's chat membership before signing Cloudinary uploads. Cloudinary hosts attachments; Firestore rules restrict attachment-message creation to signed-in chat members. The app limits attachments to 50 MB. Voice recording requires microphone permission and a secure browser context (HTTPS or localhost). In production, deploy `server/index.js` as a Node service and route `/api` to it, providing the same server environment variables there. Do not launch with Firestore in test mode.
+The Cloudinary API secret stays server-side. The upload API verifies Firebase ID tokens and verifies the user's chat membership before signing Cloudinary uploads. Cloudinary hosts attachments; Firestore rules restrict attachment-message creation to signed-in chat members. The app limits attachments to 50 MB. Voice recording requires microphone permission and a secure browser context (HTTPS or localhost).
+
+## Cloudflare Pages deployment
+
+This repository includes a Cloudflare Pages Function at `functions/api/cloudinary/signature.js`. Cloudflare Pages deploys it at `/api/cloudinary/signature` alongside the static Vite frontend, so no separate Node upload service or `VITE_UPLOAD_API_URL` is needed.
+
+In Cloudflare Pages → your project → **Settings → Variables and Secrets**, add these server-side variables for the production environment:
+
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET` (mark as a secret)
+- `FIREBASE_PROJECT_ID` (`vibely-app-68415`)
+
+Then trigger a new Pages deployment. Keep the Cloudinary API secret out of all `VITE_` variables and never commit `.env`. The `server/index.js` Node API remains available for local development (`npm run dev`); the Cloudflare Pages Function is used by the deployed frontend. Do not launch with Firestore in test mode.

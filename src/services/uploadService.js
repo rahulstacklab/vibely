@@ -1,9 +1,25 @@
 import { auth } from '../firebase.js';
 
+const UPLOAD_API_URL = import.meta.env.VITE_UPLOAD_API_URL?.trim().replace(/\/+$/, '');
+const SIGNATURE_ENDPOINT = UPLOAD_API_URL
+  ? `${UPLOAD_API_URL}/api/cloudinary/signature`
+  : '/api/cloudinary/signature';
+
 const parseResponse = async (response) => {
-  const payload = await response.json().catch(() => null);
+  const contentType = response.headers.get('content-type') || '';
+  const payload = contentType.includes('application/json')
+    ? await response.json().catch(() => null)
+    : null;
   if (!response.ok) {
+    if (response.status === 405 || !contentType.includes('application/json')) {
+      throw new Error(
+        'The upload-signing API is not deployed or routed for this live site. Deploy server/index.js and set VITE_UPLOAD_API_URL to its public base URL.'
+      );
+    }
     throw new Error(payload?.error || `Upload failed (HTTP ${response.status}).`);
+  }
+  if (!payload) {
+    throw new Error('The upload-signing API returned an invalid response.');
   }
   return payload;
 };
@@ -17,7 +33,7 @@ export const uploadToCloudinary = async (file, { chatId, messageId, type }) => {
   }
 
   const token = await auth.currentUser.getIdToken();
-  const signature = await parseResponse(await fetch('/api/cloudinary/signature', {
+  const signature = await parseResponse(await fetch(SIGNATURE_ENDPOINT, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
