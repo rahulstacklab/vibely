@@ -34,3 +34,15 @@ In Cloudflare Pages → your project → **Settings → Variables and Secrets**,
 - `FIREBASE_PROJECT_ID` (`vibely-app-68415`)
 
 Then trigger a new Pages deployment. Keep the Cloudinary API secret out of all `VITE_` variables and never commit `.env`. The `server/index.js` Node API remains available for local development (`npm run dev`); the Cloudflare Pages Function is used by the deployed frontend. Do not launch with Firestore in test mode.
+
+If you cannot manage variables in the Cloudflare dashboard, set them as Pages secrets with Wrangler instead. From the repository root, replace `<YOUR_PAGES_PROJECT_NAME>` with the Pages project name; Wrangler prompts for each value:
+
+```sh
+npx wrangler pages secret put CLOUDINARY_CLOUD_NAME --project-name <YOUR_PAGES_PROJECT_NAME>
+npx wrangler pages secret put CLOUDINARY_API_KEY --project-name <YOUR_PAGES_PROJECT_NAME>
+npx wrangler pages secret put CLOUDINARY_API_SECRET --project-name <YOUR_PAGES_PROJECT_NAME>
+npm run build
+npx wrangler pages deploy dist --project-name <YOUR_PAGES_PROJECT_NAME>
+```
+
+The secret values are stored by Cloudflare and are not added to the frontend bundle or repository. Do not paste the API secret into source code, a `VITE_` variable, or a committed config file.

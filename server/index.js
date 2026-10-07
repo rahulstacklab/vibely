@@ -4,28 +4,22 @@ import { createServer } from 'node:http';
 import process from 'node:process';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
-// const {
-//   CLOUDINARY_CLOUD_NAME,
-//   CLOUDINARY_API_KEY,
-//   CLOUDINARY_API_SECRET,
-//   FIREBASE_PROJECT_ID = 'vibely-app-68415',
-//   APP_ORIGIN = '',
-//   API_PORT = process.env.PORT || '3001'
-// } = process.env;
+const {
+  CLOUDINARY_CLOUD_NAME,
+  CLOUDINARY_API_KEY,
+  CLOUDINARY_API_SECRET,
+  FIREBASE_PROJECT_ID = 'vibely-app-68415',
+  APP_ORIGIN = '',
+  API_PORT = process.env.PORT || '3001'
+} = process.env;
 
-// for (const [name, value] of Object.entries({
-//   CLOUDINARY_CLOUD_NAME,
-//   CLOUDINARY_API_KEY,
-//   CLOUDINARY_API_SECRET
-// })) {
-//   if (!value) throw new Error(`Missing required server environment variable: ${name}`);
-// }
-
-CLOUDINARY_CLOUD_NAME=w1j3tpbt
-CLOUDINARY_API_KEY=953971763486824
-CLOUDINARY_API_SECRET=dW870dfr5OHxTQil8xRT7qIlpa8
-FIREBASE_PROJECT_ID=vibely-app-68415
-API_PORT=3001
+for (const [name, value] of Object.entries({
+  CLOUDINARY_CLOUD_NAME,
+  CLOUDINARY_API_KEY,
+  CLOUDINARY_API_SECRET
+})) {
+  if (!value) throw new Error(`Missing required server environment variable: ${name}`);
+}
 
 const secureTokenKeys = createRemoteJWKSet(
   new URL('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com')
