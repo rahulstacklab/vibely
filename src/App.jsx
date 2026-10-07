@@ -1,5 +1,25 @@
 /* eslint-disable no-unused-vars */
-import { useState, useEffect, useContext, createContext, useRef } from 'react';
+import { useState, useEffect, useContext, createContext, useRef, useCallback } from 'react';
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile
+} from 'firebase/auth';
+import {
+  collection,
+  doc,
+  getDoc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+  writeBatch
+} from 'firebase/firestore';
+import { auth, db, firebaseConfigured } from './firebase.js';
 import {
   Home, MessageCircle, Users, User, Settings, Shield, Search, Plus,
   Mic, Send, Smile, Paperclip, MoreVertical, Phone, Video,
@@ -252,39 +272,75 @@ const ThemeProvider = ({ children }) => {
 };
 
 const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(DEMO_ACCOUNTS[0]);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [isOnboarding, setIsOnboarding] = useState(false);
 
-  const login = (email, password) => {
-    const found = DEMO_ACCOUNTS.find(a => a.username === email || a.role === 'admin') || DEMO_ACCOUNTS[0];
-    setUser(found);
-  };
+  useEffect(() => onAuthStateChanged(auth, async (firebaseUser) => {
+    if (!firebaseUser) {
+      setUser(null);
+      setAuthLoading(false);
+      return;
+    }
 
-  const logout = () => setUser(null);
+    try {
+      const profileSnapshot = await getDoc(doc(db, 'users', firebaseUser.uid));
+      const profile = profileSnapshot.exists() ? profileSnapshot.data() : {};
+      setUser({
+        id: firebaseUser.uid,
+        uid: firebaseUser.uid,
+        name: profile.name || firebaseUser.displayName || firebaseUser.email,
+        username: profile.username || `@${firebaseUser.email?.split('@')[0] || 'vibely'}`,
+        avatar: profile.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=250&q=80',
+        vibe: profile.vibe || '✨ Here to connect',
+        bio: profile.bio || '',
+        role: 'user'
+      });
+    } catch (error) {
+      console.error('Unable to load the signed-in user profile.', error);
+      setUser({
+        id: firebaseUser.uid,
+        uid: firebaseUser.uid,
+        name: firebaseUser.displayName || firebaseUser.email,
+        username: `@${firebaseUser.email?.split('@')[0] || 'vibely'}`,
+        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=250&q=80',
+        vibe: '✨ Here to connect',
+        bio: '',
+        role: 'user'
+      });
+    } finally {
+      setAuthLoading(false);
+    }
+  }), []);
 
-  const register = (formData) => {
-    const newUser = {
-      id: `u_${Date.now()}`,
-      name: formData.fullName || 'New Vibely User',
-      username: `@${formData.username || 'vibely_user'}`,
+  const login = (email, password) => signInWithEmailAndPassword(auth, email, password);
+
+  const logout = () => signOut(auth);
+
+  const register = async ({ fullName, email, password }) => {
+    const credential = await createUserWithEmailAndPassword(auth, email, password);
+    const name = fullName.trim();
+    const profile = {
+      name,
+      username: `@${email.split('@')[0]}`,
       avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=250&q=80',
-      vibe: '✨ Excited to be here!',
-      mood: 'Happy',
-      bio: formData.bio || 'Exploring Vibely connections.',
-      role: 'user',
-      connectionsCount: 1
+      vibe: '✨ Here to connect',
+      bio: '',
+      createdAt: serverTimestamp()
     };
-    setUser(newUser);
-    setIsOnboarding(true);
-  };
 
-  const switchAccount = (accountId) => {
-    const target = DEMO_ACCOUNTS.find(a => a.id === accountId);
-    if (target) setUser(target);
+    try {
+      await updateProfile(credential.user, { displayName: name });
+      await setDoc(doc(db, 'users', credential.user.uid), profile);
+      setUser({ id: credential.user.uid, uid: credential.user.uid, ...profile, role: 'user' });
+    } catch (error) {
+      await signOut(auth);
+      throw error;
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, login, logout, register, switchAccount, isOnboarding, setIsOnboarding }}>
+    <AuthContext.Provider value={{ user, setUser, login, logout, register, authLoading, isOnboarding, setIsOnboarding }}>
       {children}
     </AuthContext.Provider>
   );
@@ -308,7 +364,23 @@ const RouterProvider = ({ children }) => {
 };
 
 const DataProvider = ({ children }) => {
-  const [chats, setChats] = useState(MOCK_CHATS);
+  const { user } = useContext(AuthContext);
+  const [chatState, setChatState] = useState({ uid: null, chats: [] });
+  const [userState, setUserState] = useState({ uid: null, users: [] });
+  const chats = chatState.uid === user?.uid ? chatState.chats : [];
+  const users = userState.uid === user?.uid ? userState.users : [];
+  const setChats = useCallback((update) => setChatState(current => ({
+    uid: user?.uid || null,
+    chats: typeof update === 'function'
+      ? update(current.uid === user?.uid ? current.chats : [])
+      : update
+  })), [user?.uid]);
+  const setUsers = useCallback((update) => setUserState(current => ({
+    uid: user?.uid || null,
+    users: typeof update === 'function'
+      ? update(current.uid === user?.uid ? current.users : [])
+      : update
+  })), [user?.uid]);
   const [stories, setStories] = useState(MOCK_STORIES);
   const [circles, setCircles] = useState(MOCK_CIRCLES);
   const [moments, setMoments] = useState(MOCK_MOMENTS);
@@ -316,30 +388,133 @@ const DataProvider = ({ children }) => {
   const [activeCall, setActiveCall] = useState(null); // { user, type: 'voice' | 'video' }
   const [toastMessage, setToastMessage] = useState(null);
 
-  const showToast = (msg) => {
+  const showToast = useCallback((msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  }, []);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      return undefined;
+    }
+
+    const messageSubscriptions = new Map();
+    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      setUsers(snapshot.docs
+        .map(userDoc => ({ id: userDoc.id, ...userDoc.data() }))
+        .filter(profile => profile.id !== user.uid));
+    }, (error) => {
+      console.error('Unable to load users.', error);
+      showToast(`Couldn't load users: ${error.message}`);
+    });
+
+    const chatQuery = query(
+      collection(db, 'chats'),
+      where('participants', 'array-contains', user.uid)
+    );
+    const unsubscribeChats = onSnapshot(chatQuery, (snapshot) => {
+      const chatIds = new Set(snapshot.docs.map(chatDoc => chatDoc.id));
+      messageSubscriptions.forEach((unsubscribe, chatId) => {
+        if (!chatIds.has(chatId)) {
+          unsubscribe();
+          messageSubscriptions.delete(chatId);
+        }
+      });
+
+      setChats(previousChats => snapshot.docs.map(chatDoc => {
+        const existingChat = previousChats.find(chat => chat.id === chatDoc.id);
+        return {
+          id: chatDoc.id,
+          ...chatDoc.data(),
+          isGroup: false,
+          messages: existingChat?.messages || []
+        };
+      }).sort((first, second) => {
+        const firstTime = first.updatedAt?.toMillis?.() || 0;
+        const secondTime = second.updatedAt?.toMillis?.() || 0;
+        return secondTime - firstTime;
+      }));
+
+      snapshot.docs.forEach((chatDoc) => {
+        if (messageSubscriptions.has(chatDoc.id)) return;
+
+        const messagesQuery = query(
+          collection(db, 'chats', chatDoc.id, 'messages'),
+          orderBy('createdAt', 'asc')
+        );
+        const unsubscribeMessages = onSnapshot(messagesQuery, (messagesSnapshot) => {
+          setChats(previousChats => previousChats.map(chat => chat.id === chatDoc.id
+            ? {
+              ...chat,
+              messages: messagesSnapshot.docs.map(messageDoc => {
+                const message = messageDoc.data();
+                return {
+                  id: messageDoc.id,
+                  ...message,
+                  timestamp: message.createdAt?.toDate
+                    ? message.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : ''
+                };
+              })
+            }
+            : chat));
+        }, (error) => {
+          console.error(`Unable to load messages for chat ${chatDoc.id}.`, error);
+          showToast(`Couldn't load messages: ${error.message}`);
+        });
+        messageSubscriptions.set(chatDoc.id, unsubscribeMessages);
+      });
+    }, (error) => {
+      console.error('Unable to load chats.', error);
+      showToast(`Couldn't load chats: ${error.message}`);
+    });
+
+    return () => {
+      unsubscribeUsers();
+      unsubscribeChats();
+      messageSubscriptions.forEach(unsubscribe => unsubscribe());
+    };
+  }, [user?.uid, setChats, setUsers, showToast]);
+
+  const createChat = async (targetUser) => {
+    if (!user?.uid || !targetUser?.id || targetUser.id === user.uid) {
+      throw new Error('Choose another signed-in user to start a chat.');
+    }
+
+    const participants = [user.uid, targetUser.id].sort();
+    const chatId = participants.join('_');
+    const chatRef = doc(db, 'chats', chatId);
+    const chatSnapshot = await getDoc(chatRef);
+
+    if (!chatSnapshot.exists()) {
+      await setDoc(chatRef, {
+        participants,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    }
+
+    return chatId;
   };
 
-  const sendMessage = (chatId, text, type = 'text', extra = {}) => {
-    setChats(prev => prev.map(chat => {
-      if (chat.id === chatId) {
-        const newMsg = {
-          id: `m_${Date.now()}`,
-          senderId: DEMO_ACCOUNTS[0].id,
-          text,
-          type,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          status: 'sent',
-          ...extra
-        };
-        return {
-          ...chat,
-          messages: [...chat.messages, newMsg]
-        };
-      }
-      return chat;
-    }));
+  const sendMessage = async (chatId, text) => {
+    const cleanText = text.trim();
+    if (!cleanText || !user?.uid) return;
+
+    const chatRef = doc(db, 'chats', chatId);
+    const messageRef = doc(collection(db, 'chats', chatId, 'messages'));
+    const batch = writeBatch(db);
+    batch.set(messageRef, {
+      senderId: user.uid,
+      text: cleanText,
+      type: 'text',
+      createdAt: serverTimestamp()
+    });
+    batch.set(chatRef, {
+      lastMessage: cleanText,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    await batch.commit();
   };
 
   const addReaction = (chatId, messageId, emoji) => {
@@ -398,8 +573,8 @@ const DataProvider = ({ children }) => {
 
   return (
     <DataContext.Provider value={{
-      chats, stories, circles, moments, savedMessages, activeCall, toastMessage,
-      sendMessage, addReaction, toggleSaveMessage, votePoll, createCircle,
+      chats, users, stories, circles, moments, savedMessages, activeCall, toastMessage,
+      createChat, sendMessage, addReaction, toggleSaveMessage, votePoll, createCircle,
       setActiveCall, showToast
     }}>
       {children}
@@ -469,7 +644,7 @@ const Toast = ({ message }) => {
 
 const Sidebar = () => {
   const { currentRoute, navigate } = useContext(RouterContext);
-  const { logout, user, switchAccount } = useContext(AuthContext);
+  const { logout, user } = useContext(AuthContext);
   const { isDark, toggleTheme } = useContext(ThemeContext);
 
   const navItems = [
@@ -526,25 +701,6 @@ const Sidebar = () => {
           );
         })}
       </nav>
-
-      {/* Account Switcher Demo Bar */}
-      <div className="px-3 py-2 border-t border-slate-100 dark:border-slate-800/80">
-        <div className="p-2 bg-slate-50 dark:bg-slate-900/60 rounded-2xl">
-          <p className="hidden lg:block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1.5 px-1">Switch Demo Account</p>
-          <div className="flex justify-around lg:justify-start lg:space-x-2">
-            {DEMO_ACCOUNTS.map(acc => (
-              <button
-                key={acc.id}
-                onClick={() => switchAccount(acc.id)}
-                title={`Switch to ${acc.name}`}
-                className={`p-1 rounded-full border-2 transition-all ${user?.id === acc.id ? 'border-violet-500 scale-110' : 'border-transparent opacity-60 hover:opacity-100'}`}
-              >
-                <img src={acc.avatar} className="w-7 h-7 rounded-full object-cover" alt={acc.name} />
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
 
       <div className="p-3 border-t border-slate-100 dark:border-slate-800 space-y-1">
         <button onClick={toggleTheme} className="w-full flex items-center justify-center lg:justify-start p-2.5 rounded-2xl text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-900 transition-all">
@@ -616,7 +772,7 @@ const BottomNav = () => {
 const CompassIcon = ({ size, className }) => <Globe size={size} className={className} />;
 
 const DashboardView = () => {
-  const { stories, chats } = useContext(DataContext);
+  const { stories, chats, users } = useContext(DataContext);
   const { navigate } = useContext(RouterContext);
   const { user, setUser } = useContext(AuthContext);
 
@@ -748,7 +904,7 @@ const DashboardView = () => {
           <div className="bg-white dark:bg-slate-950 rounded-3xl p-2 shadow-sm border border-slate-200/80 dark:border-slate-800/80 divide-y divide-slate-100 dark:divide-slate-800/60">
             {chats.map(chat => {
               const isGroup = chat.isGroup;
-              const otherUser = !isGroup ? MOCK_USERS.find(u => chat.participants.includes(u.id) && u.id !== user.id) : null;
+              const otherUser = !isGroup ? users.find(u => chat.participants.includes(u.id) && u.id !== user.id) : null;
               const lastMsg = chat.messages[chat.messages.length - 1];
 
               return (
@@ -766,7 +922,7 @@ const DashboardView = () => {
                   <div className="ml-4 flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
                       <h3 className="font-semibold text-slate-900 dark:text-white truncate text-sm">
-                        {isGroup ? chat.groupName : otherUser?.name}
+                        {isGroup ? chat.groupName : otherUser?.name || 'Vibely member'}
                       </h3>
                       <span className="text-[11px] text-slate-400 shrink-0">{lastMsg?.timestamp}</span>
                     </div>
@@ -782,6 +938,14 @@ const DashboardView = () => {
                 </div>
               );
             })}
+            {chats.length === 0 && (
+              <div className="p-6 text-center">
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">No conversations yet</p>
+                <button onClick={() => navigate('/discover')} className="mt-2 text-xs font-semibold text-violet-600 hover:underline dark:text-violet-400">
+                  Find someone to message
+                </button>
+              </div>
+            )}
           </div>
         </section>
 
@@ -791,11 +955,11 @@ const DashboardView = () => {
 };
 
 const ChatView = () => {
-  const { chats, sendMessage, addReaction, toggleSaveMessage, votePoll, setActiveCall, showToast } = useContext(DataContext);
+  const { chats, users, createChat, sendMessage, addReaction, toggleSaveMessage, votePoll, setActiveCall, showToast } = useContext(DataContext);
   const { routeParams, navigate } = useContext(RouterContext);
   const { user } = useContext(AuthContext);
 
-  const [activeChatId, setActiveChatId] = useState(routeParams.chatId || chats[0]?.id);
+  const activeChatId = routeParams.chatId || null;
   const [inputText, setInputText] = useState('');
   const [audioSpeed, setAudioSpeed] = useState('1x');
   const [isPlayingAudio, setIsPlayingAudio] = useState({});
@@ -803,9 +967,9 @@ const ChatView = () => {
   const [showTranslation, setShowTranslation] = useState({});
   const messagesEndRef = useRef(null);
 
-  const activeChat = chats.find(c => c.id === activeChatId) || chats[0];
+  const activeChat = chats.find(c => c.id === activeChatId);
   const isGroup = activeChat?.isGroup;
-  const otherUser = !isGroup ? MOCK_USERS.find(u => activeChat?.participants.includes(u.id) && u.id !== user.id) : null;
+  const otherUser = !isGroup ? users.find(u => activeChat?.participants.includes(u.id) && u.id !== user.id) : null;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -814,17 +978,13 @@ const ChatView = () => {
   const handleSend = (e) => {
     e.preventDefault();
     if (!inputText.trim()) return;
-    sendMessage(activeChat.id, inputText);
-    setInputText('');
-  };
-
-  const handleVoiceRecordSim = () => {
-    sendMessage(activeChat.id, 'Voice message recorded', 'voice', {
-      duration: '0:18',
-      audioUrl: '#',
-      transcript: 'Hey! I am currently testing the Vibely voice note system with AI transcript.'
-    });
-    showToast('Voice message sent! 🎙️');
+    if (!activeChat) return;
+    sendMessage(activeChat.id, inputText)
+      .then(() => setInputText(''))
+      .catch((error) => {
+        console.error('Unable to send message.', error);
+        showToast(`Couldn't send message: ${error.message}`);
+      });
   };
 
   return (
@@ -835,7 +995,7 @@ const ChatView = () => {
         <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
           <h1 className="text-xl font-bold text-slate-900 dark:text-white">Messages</h1>
           <div className="flex items-center space-x-1">
-            <IconButton icon={Plus} title="New Chat" onClick={() => showToast('Select a user from Discover to chat!')} />
+            <IconButton icon={Plus} title="New Chat" onClick={() => navigate('/discover')} />
             <IconButton icon={Filter} title="Filter Chats" />
           </div>
         </div>
@@ -856,7 +1016,7 @@ const ChatView = () => {
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/50 p-2 space-y-1">
           {chats.map(chat => {
             const chatIsGroup = chat.isGroup;
-            const targetUser = !chatIsGroup ? MOCK_USERS.find(u => chat.participants.includes(u.id) && u.id !== user.id) : null;
+            const targetUser = !chatIsGroup ? users.find(u => chat.participants.includes(u.id) && u.id !== user.id) : null;
             const lastMsg = chat.messages[chat.messages.length - 1];
             const isSelected = chat.id === activeChatId;
 
@@ -864,7 +1024,6 @@ const ChatView = () => {
               <div 
                 key={chat.id}
                 onClick={() => {
-                  setActiveChatId(chat.id);
                   navigate('/chats', { chatId: chat.id });
                 }}
                 className={`flex items-center p-3 rounded-2xl cursor-pointer transition-all ${isSelected ? 'bg-violet-50 dark:bg-violet-950/40 border border-violet-200/50 dark:border-violet-900/40' : 'hover:bg-slate-50 dark:hover:bg-slate-900/50'}`}
@@ -878,7 +1037,7 @@ const ChatView = () => {
                 <div className="ml-3 flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-white truncate">
-                      {chatIsGroup ? chat.groupName : targetUser?.name}
+                      {chatIsGroup ? chat.groupName : targetUser?.name || 'Vibely member'}
                     </h3>
                     <span className="text-[10px] text-slate-400">{lastMsg?.timestamp}</span>
                   </div>
@@ -909,10 +1068,10 @@ const ChatView = () => {
                 )}
                 <div>
                   <h2 className="text-sm font-bold text-slate-900 dark:text-white leading-tight">
-                    {isGroup ? activeChat.groupName : otherUser?.name}
+                    {isGroup ? activeChat.groupName : otherUser?.name || 'Vibely member'}
                   </h2>
                   <p className="text-[11px] text-emerald-500 font-medium">
-                    {isGroup ? `${activeChat.participants.length} members` : (otherUser?.isOnline ? 'Online now' : 'Offline')}
+                    {isGroup ? `${activeChat.participants.length} members` : 'Live chat'}
                   </p>
                 </div>
               </div>
@@ -928,7 +1087,7 @@ const ChatView = () => {
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               <div className="flex justify-center my-2">
                 <span className="text-[11px] font-semibold bg-white dark:bg-slate-800 text-slate-500 px-3 py-1 rounded-full shadow-sm border border-slate-100 dark:border-slate-700">
-                  End-to-end encrypted • Disappearing messages Off
+                  Live messages • Your conversation is saved to your account
                 </span>
               </div>
 
@@ -1074,7 +1233,7 @@ const ChatView = () => {
                     <Send size={18} />
                   </button>
                 ) : (
-                  <button type="button" onClick={handleVoiceRecordSim} title="Hold for voice message" className="bg-slate-900 dark:bg-slate-800 text-white p-3 rounded-2xl hover:bg-slate-800 transition-transform active:scale-95">
+                  <button type="button" onClick={() => showToast('Type a message to send it live.')} title="Send a message" className="bg-slate-900 dark:bg-slate-800 text-white p-3 rounded-2xl hover:bg-slate-800 transition-transform active:scale-95">
                     <Mic size={18} />
                   </button>
                 )}
@@ -1082,7 +1241,12 @@ const ChatView = () => {
             </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-slate-400">Select a conversation to start chatting</div>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-slate-400">
+            <p>Select a conversation or find someone new to chat with.</p>
+            <button onClick={() => navigate('/discover')} className="rounded-xl bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-700">
+              Discover people
+            </button>
+          </div>
         )}
       </div>
 
@@ -1278,7 +1442,18 @@ const MomentsView = () => {
 };
 
 const DiscoverView = () => {
-  const { showToast } = useContext(DataContext);
+  const { users, createChat, showToast } = useContext(DataContext);
+  const { navigate } = useContext(RouterContext);
+
+  const messageUser = async (targetUser) => {
+    try {
+      const chatId = await createChat(targetUser);
+      navigate('/chats', { chatId });
+    } catch (error) {
+      console.error('Unable to start chat.', error);
+      showToast(`Couldn't start chat: ${error.message}`);
+    }
+  };
 
   return (
     <div className="flex-1 p-4 md:p-8 bg-slate-50 dark:bg-slate-900 overflow-y-auto pb-24 md:pb-8">
@@ -1289,27 +1464,30 @@ const DiscoverView = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {MOCK_USERS.map(u => (
+          {users.map(u => (
             <div key={u.id} className="bg-white dark:bg-slate-950 p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 flex items-center justify-between shadow-sm">
               <div className="flex items-center space-x-3">
                 <Avatar src={u.avatar} size="md" isOnline={u.isOnline} vibe={u.vibe} />
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white">{u.name}</h3>
-                  <p className="text-xs text-violet-600 dark:text-violet-400">{u.vibe}</p>
-                  <p className="text-[11px] text-slate-400 mt-1">{u.bio}</p>
+                  <p className="text-xs text-violet-600 dark:text-violet-400">{u.vibe || '✨ Here to connect'}</p>
+                  <p className="text-[11px] text-slate-400 mt-1">{u.bio || 'Ready to meet new people.'}</p>
                 </div>
               </div>
               <button 
-                onClick={() => {
-                  showToast(`Connection request sent to ${u.name}!`);
-                }}
+                onClick={() => messageUser(u)}
                 className="bg-slate-900 dark:bg-slate-800 text-white px-3 py-2 rounded-2xl text-xs font-semibold hover:bg-violet-600 transition-colors"
               >
-                Connect
+                Message
               </button>
             </div>
           ))}
         </div>
+        {users.length === 0 && (
+          <p className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950">
+            No other Vibely members yet. Invite a friend to create an account and start chatting.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -1485,6 +1663,148 @@ const ActiveCallOverlay = () => {
   );
 };
 
+const AuthGate = () => {
+  const { user, authLoading, login, register } = useContext(AuthContext);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500 dark:bg-slate-900">
+        Connecting to Vibely…
+      </div>
+    );
+  }
+
+  if (!firebaseConfigured) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 dark:bg-slate-900">
+        <div className="max-w-lg rounded-3xl border border-amber-200 bg-white p-8 text-center shadow-sm dark:border-amber-900 dark:bg-slate-950">
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Finish Firebase setup</h1>
+          <p className="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">
+            Add your Firebase Web API key and app ID to a local <code>.env</code> file. See the project README for setup and Firestore rules.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (user) return <MainAppLayout />;
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setErrorMessage('');
+    setIsSubmitting(true);
+
+    try {
+      if (isRegistering) {
+        await register({ fullName, email: email.trim(), password });
+      } else {
+        await login(email.trim(), password);
+      }
+    } catch (error) {
+      console.error('Authentication failed.', error);
+      const messages = {
+        'auth/email-already-in-use': 'An account already exists for this email. Sign in instead.',
+        'auth/invalid-credential': 'Email or password is incorrect.',
+        'auth/invalid-email': 'Enter a valid email address.',
+        'auth/weak-password': 'Use a password with at least 6 characters.',
+        'auth/network-request-failed': 'Network error. Check your connection and try again.'
+      };
+      setErrorMessage(messages[error.code] || error.message || 'Unable to authenticate. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-violet-50 via-white to-fuchsia-50 p-4 dark:from-slate-950 dark:via-slate-900 dark:to-violet-950">
+      <section className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-7 shadow-xl dark:border-slate-800 dark:bg-slate-950 sm:p-9">
+        <div className="mb-7 text-center">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-tr from-violet-600 to-fuchsia-500 text-white">
+            <Activity size={24} />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Welcome to Vibely</h1>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            {isRegistering ? 'Create an account and meet your people.' : 'Sign in to catch up and chat live.'}
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {isRegistering && (
+            <label className="block space-y-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">
+              Name
+              <input
+                required
+                minLength={2}
+                autoComplete="name"
+                value={fullName}
+                onChange={event => setFullName(event.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-violet-500 dark:border-slate-700 dark:bg-slate-900"
+                placeholder="Your name"
+              />
+            </label>
+          )}
+          <label className="block space-y-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">
+            Email
+            <input
+              required
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={event => setEmail(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-violet-500 dark:border-slate-700 dark:bg-slate-900"
+              placeholder="you@example.com"
+            />
+          </label>
+          <label className="block space-y-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">
+            Password
+            <input
+              required
+              type="password"
+              minLength={6}
+              autoComplete={isRegistering ? 'new-password' : 'current-password'}
+              value={password}
+              onChange={event => setPassword(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-violet-500 dark:border-slate-700 dark:bg-slate-900"
+              placeholder="At least 6 characters"
+            />
+          </label>
+          {errorMessage && (
+            <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+              {errorMessage}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full rounded-xl bg-violet-600 px-4 py-3 font-semibold text-white transition hover:bg-violet-700 disabled:cursor-wait disabled:opacity-60"
+          >
+            {isSubmitting ? 'Please wait…' : isRegistering ? 'Create account' : 'Sign in'}
+          </button>
+        </form>
+        <p className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
+          {isRegistering ? 'Already have an account?' : 'New to Vibely?'}{' '}
+          <button
+            type="button"
+            onClick={() => {
+              setIsRegistering(value => !value);
+              setErrorMessage('');
+            }}
+            className="font-semibold text-violet-600 hover:underline dark:text-violet-400"
+          >
+            {isRegistering ? 'Sign in' : 'Create an account'}
+          </button>
+        </p>
+      </section>
+    </main>
+  );
+};
+
 const MainAppLayout = () => {
   const { currentRoute } = useContext(RouterContext);
   const { toastMessage } = useContext(DataContext);
@@ -1521,7 +1841,7 @@ export default function App() {
       <AuthProvider>
         <DataProvider>
           <RouterProvider>
-            <MainAppLayout />
+            <AuthGate />
           </RouterProvider>
         </DataProvider>
       </AuthProvider>

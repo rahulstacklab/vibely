@@ -1,16 +1,22 @@
-# React + Vite
+# Vibely
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Vibely is a React and Vite chat app backed by Firebase Authentication and Cloud Firestore. Accounts use email and password; conversations and messages update live for both participants.
 
-Currently, two official plugins are available:
+## Firebase setup
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+1. In the Firebase console for the `vibely-app-68415` project, enable **Authentication → Sign-in method → Email/Password** and create a **Cloud Firestore** database.
+2. Register or select the Firebase web app and copy its web configuration into a local `.env` file. Start from `.env.example`; the API key and app ID must be replaced with the values from **Project settings → Your apps**.
+3. Publish the security rules in `firestore.rules` using the Firebase console Rules tab, or deploy them with the Firebase CLI:
 
-## React Compiler
+   ```sh
+   firebase deploy --only firestore:rules
+   ```
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+4. Start the app:
 
-## Expanding the ESLint configuration
+   ```sh
+   npm install
+   npm run dev
+   ```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+The Firebase web configuration is public client configuration, not a server secret. Firestore security rules enforce that users can only read chats they participate in and can only send messages as themselves. Do not launch with Firestore in test mode.
