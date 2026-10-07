@@ -20,13 +20,14 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { auth, db, firebaseConfigured } from './firebase.js';
+import { uploadToCloudinary } from './services/uploadService.js';
 import {
   Home, MessageCircle, Users, User, Settings, Shield, Search, Plus,
   Mic, Send, Smile, Paperclip, MoreVertical, Phone, Video,
   CheckCheck, Sun, Moon, LogOut, Bell, ChevronLeft, Heart,
-  Activity, X, Play, Pause, Lock, Coffee, Laptop, Flame,
+  Activity, X, Lock, Coffee, Laptop, Flame,
   Sparkles, Filter, Globe, Sliders, Bookmark,
-  ShieldAlert, PhoneOff, MicOff, VideoOff
+  ShieldAlert, PhoneOff, MicOff, VideoOff, FileText, StopCircle
 } from 'lucide-react';
 
 const DEMO_ACCOUNTS = [
@@ -247,6 +248,48 @@ const ThemeContext = createContext();
 const AuthContext = createContext();
 const RouterContext = createContext();
 const DataContext = createContext();
+const ATTACHMENT_MIME_TYPES = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  webm: 'video/webm',
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  odt: 'application/vnd.oasis.opendocument.text',
+  rtf: 'application/rtf',
+  txt: 'text/plain'
+};
+const SUPPORTED_DOCUMENT_MIME_TYPES = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/vnd.oasis.opendocument.text',
+  'application/rtf',
+  'text/rtf',
+  'text/plain'
+];
+
+const getAttachmentMimeType = (file) => {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  return file.type && file.type !== 'application/octet-stream'
+    ? file.type
+    : ATTACHMENT_MIME_TYPES[extension] || file.type || 'application/octet-stream';
+};
 
 const ThemeProvider = ({ children }) => {
   const [isDark, setIsDark] = useState(() => {
@@ -517,6 +560,53 @@ const DataProvider = ({ children }) => {
     await batch.commit();
   };
 
+  const sendAttachment = async (chatId, file, type, duration = null) => {
+    if (!user?.uid || !file) throw new Error('You must be signed in to send an attachment.');
+    if (file.size <= 0 || file.size > 50 * 1024 * 1024) {
+      throw new Error('Attachments must be smaller than 50 MB.');
+    }
+
+    const chatRef = doc(db, 'chats', chatId);
+    const messageRef = doc(collection(db, 'chats', chatId, 'messages'));
+    const safeFileName = file.name.replace(/[\\/]/g, '_').slice(0, 180) || `${type}-attachment`;
+    const mimeType = getAttachmentMimeType(file);
+    if (
+      (type === 'image' && !mimeType.startsWith('image/')) ||
+      (type === 'video' && !mimeType.startsWith('video/')) ||
+      (type === 'voice' && !mimeType.startsWith('audio/')) ||
+      (type === 'document' && !SUPPORTED_DOCUMENT_MIME_TYPES.includes(mimeType))
+    ) {
+      throw new Error('Choose a supported image, video, audio recording, PDF, Office document, RTF or text file.');
+    }
+    const uploadedFile = await uploadToCloudinary(file, {
+      chatId,
+      messageId: messageRef.id,
+      type
+    });
+    const label = type === 'voice' ? 'Voice note' : `${type[0].toUpperCase()}${type.slice(1)}: ${safeFileName}`;
+    const batch = writeBatch(db);
+    const messageData = {
+      senderId: user.uid,
+      text: label,
+      type,
+      attachmentUrl: uploadedFile.secureUrl,
+      cloudinaryPublicId: uploadedFile.publicId,
+      cloudinaryResourceType: uploadedFile.resourceType,
+      fileName: safeFileName,
+      mimeType,
+      fileSize: uploadedFile.bytes || file.size,
+      createdAt: serverTimestamp()
+    };
+    if (duration !== null) messageData.duration = duration;
+
+    batch.set(messageRef, messageData);
+    batch.set(chatRef, {
+      lastMessage: label,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    await batch.commit();
+  };
+
   const addReaction = (chatId, messageId, emoji) => {
     setChats(prev => prev.map(chat => {
       if (chat.id === chatId) {
@@ -574,7 +664,7 @@ const DataProvider = ({ children }) => {
   return (
     <DataContext.Provider value={{
       chats, users, stories, circles, moments, savedMessages, activeCall, toastMessage,
-      createChat, sendMessage, addReaction, toggleSaveMessage, votePoll, createCircle,
+      createChat, sendMessage, sendAttachment, addReaction, toggleSaveMessage, votePoll, createCircle,
       setActiveCall, showToast
     }}>
       {children}
@@ -616,12 +706,15 @@ const StoryRing = ({ src, isViewed, size = 'lg', className = '' }) => {
   );
 };
 
-const IconButton = ({ icon: Icon, onClick, active, badge, className = '', title }) => (
+const IconButton = ({ icon: Icon, onClick, active, badge, className = '', title, disabled = false }) => (
   <button 
+    type="button"
     onClick={onClick}
     title={title}
+    disabled={disabled}
     className={`relative p-2.5 rounded-2xl transition-all duration-200 active:scale-95
       ${active ? 'bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400' : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 dark:text-slate-400'}
+      ${disabled ? 'cursor-not-allowed opacity-50' : ''}
       ${className}
     `}
   >
@@ -955,17 +1048,19 @@ const DashboardView = () => {
 };
 
 const ChatView = () => {
-  const { chats, users, createChat, sendMessage, addReaction, toggleSaveMessage, votePoll, setActiveCall, showToast } = useContext(DataContext);
+  const { chats, users, createChat, sendMessage, sendAttachment, addReaction, toggleSaveMessage, votePoll, setActiveCall, showToast } = useContext(DataContext);
   const { routeParams, navigate } = useContext(RouterContext);
   const { user } = useContext(AuthContext);
 
   const activeChatId = routeParams.chatId || null;
   const [inputText, setInputText] = useState('');
-  const [audioSpeed, setAudioSpeed] = useState('1x');
-  const [isPlayingAudio, setIsPlayingAudio] = useState({});
-  const [showTranscript, setShowTranscript] = useState({});
   const [showTranslation, setShowTranslation] = useState({});
+  const [isUploading, setIsUploading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const recordingStartedAtRef = useRef(0);
 
   const activeChat = chats.find(c => c.id === activeChatId);
   const isGroup = activeChat?.isGroup;
@@ -985,6 +1080,89 @@ const ChatView = () => {
         console.error('Unable to send message.', error);
         showToast(`Couldn't send message: ${error.message}`);
       });
+  };
+
+  const handleAttachmentSelected = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || !activeChat) return;
+
+    const mimeType = getAttachmentMimeType(file);
+    const type = mimeType.startsWith('image/')
+      ? 'image'
+      : mimeType.startsWith('video/')
+        ? 'video'
+        : 'document';
+    setIsUploading(true);
+    try {
+      await sendAttachment(activeChat.id, file, type);
+    } catch (error) {
+      console.error('Unable to upload attachment.', error);
+      showToast(`Couldn't send file: ${error.message}`);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleVoiceRecord = async () => {
+    if (isUploading || !activeChat) return;
+
+    if (isRecording) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      showToast('Voice recording is not supported in this browser.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
+        .find(candidate => MediaRecorder.isTypeSupported(candidate));
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const chunks = [];
+      const chatId = activeChat.id;
+      recorder.ondataavailable = event => {
+        if (event.data.size > 0) chunks.push(event.data);
+      };
+      recorder.onerror = event => {
+        console.error('Voice recording failed.', event.error);
+        showToast(`Voice recording failed: ${event.error?.message || 'unknown error'}`);
+      };
+      recorder.onstart = () => {
+        recordingStartedAtRef.current = Date.now();
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        mediaRecorderRef.current = null;
+        setIsRecording(false);
+        const durationSeconds = Math.max(1, Math.round((Date.now() - recordingStartedAtRef.current) / 1000));
+        if (!chunks.length) return;
+
+        const audioBlob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+        const extension = audioBlob.type.includes('mp4') ? 'm4a' : 'webm';
+        const voiceFile = new File([audioBlob], `voice-note-${Date.now()}.${extension}`, {
+          type: audioBlob.type
+        });
+        setIsUploading(true);
+        try {
+          await sendAttachment(chatId, voiceFile, 'voice', durationSeconds);
+        } catch (error) {
+          console.error('Unable to send voice note.', error);
+          showToast(`Couldn't send voice note: ${error.message}`);
+        } finally {
+          setIsUploading(false);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error('Unable to start voice recording.', error);
+      showToast(`Couldn't access your microphone: ${error.message}`);
+    }
   };
 
   return (
@@ -1104,47 +1282,9 @@ const ChatView = () => {
                         {/* Voice Message Player Layout */}
                         {msg.type === 'voice' ? (
                           <div className="space-y-2">
-                            <div className="flex items-center space-x-3">
-                              <button 
-                                onClick={() => setIsPlayingAudio(p => ({ ...p, [msg.id]: !p[msg.id] }))}
-                                className={`p-2.5 rounded-full ${isMe ? 'bg-white/20 text-white' : 'bg-violet-600 text-white'}`}
-                              >
-                                {isPlayingAudio[msg.id] ? <Pause size={16} /> : <Play size={16} />}
-                              </button>
-                              
-                              {/* Simulated Waveform */}
-                              <div className="flex-1 flex items-center space-x-1 h-6">
-                                {[40, 75, 30, 90, 60, 100, 45, 80, 50, 95, 35, 70].map((h, i) => (
-                                  <div key={i} className={`flex-1 rounded-full transition-all ${isMe ? 'bg-white/60' : 'bg-violet-500'}`} style={{ height: `${h}%` }}></div>
-                                ))}
-                              </div>
-
-                              <span className="text-xs opacity-80">{msg.duration}</span>
-                              <button 
-                                onClick={() => setAudioSpeed(s => s === '1x' ? '1.5x' : s === '1.5x' ? '2x' : '1x')}
-                                className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-black/10 dark:bg-white/10"
-                              >
-                                {audioSpeed}
-                              </button>
-                            </div>
-
-                            {/* AI Voice Transcript Button */}
-                            {msg.transcript && (
-                              <div className="pt-2 border-t border-current/10">
-                                <button 
-                                  onClick={() => setShowTranscript(p => ({ ...p, [msg.id]: !p[msg.id] }))}
-                                  className="text-[11px] font-semibold flex items-center space-x-1 opacity-90 hover:underline"
-                                >
-                                  <Sparkles size={12} />
-                                  <span>{showTranscript[msg.id] ? 'Hide AI Transcript' : 'View AI Transcript'}</span>
-                                </button>
-                                {showTranscript[msg.id] && (
-                                  <p className="text-xs italic mt-1.5 p-2 rounded-xl bg-black/10 dark:bg-white/10">
-                                    "{msg.transcript}"
-                                  </p>
-                                )}
-                              </div>
-                            )}
+                            <p className="font-semibold">Voice note</p>
+                            <audio controls preload="metadata" src={msg.attachmentUrl} className="max-w-full" />
+                            <p className="text-xs opacity-75">{msg.duration}s</p>
                           </div>
                         ) : msg.type === 'poll' ? (
                           /* Poll Layout */
@@ -1169,8 +1309,32 @@ const ChatView = () => {
                               })}
                             </div>
                           </div>
+                        ) : msg.type === 'image' ? (
+                          <div className="space-y-2">
+                            {msg.text && <p>{msg.text}</p>}
+                            <a href={msg.attachmentUrl} target="_blank" rel="noreferrer">
+                              <img src={msg.attachmentUrl} alt={msg.fileName || 'Shared image'} className="max-h-80 max-w-full rounded-xl object-contain" />
+                            </a>
+                          </div>
+                        ) : msg.type === 'video' ? (
+                          <div className="space-y-2">
+                            {msg.text && <p>{msg.text}</p>}
+                            <video controls preload="metadata" src={msg.attachmentUrl} className="max-h-80 max-w-full rounded-xl" />
+                          </div>
+                        ) : msg.type === 'document' ? (
+                          <a
+                            href={msg.attachmentUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-3 rounded-xl bg-black/10 p-3 hover:bg-black/15 dark:bg-white/10 dark:hover:bg-white/15"
+                          >
+                            <FileText size={24} className="shrink-0" />
+                            <span className="min-w-0">
+                              <span className="block truncate font-semibold">{msg.fileName || msg.text}</span>
+                              <span className="text-xs opacity-75">{(msg.fileSize / (1024 * 1024)).toFixed(2)} MB · Open file</span>
+                            </span>
+                          </a>
                         ) : (
-                          /* Standard Text Layout */
                           <p>{msg.text}</p>
                         )}
 
@@ -1215,11 +1379,24 @@ const ChatView = () => {
             {/* Input Bar */}
             <div className="p-3 bg-white dark:bg-slate-950 border-t border-slate-200/80 dark:border-slate-800/80">
               <form onSubmit={handleSend} className="flex items-center space-x-2 max-w-4xl mx-auto">
-                <IconButton icon={Paperclip} title="Attach media" onClick={() => showToast('Attachment options open!')} />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,video/*,.pdf,.doc,.docx,.txt,.rtf,.odt,.xls,.xlsx,.ppt,.pptx"
+                  onChange={handleAttachmentSelected}
+                  className="hidden"
+                />
+                <IconButton
+                  icon={Paperclip}
+                  title="Attach a document, image or video"
+                  disabled={isUploading || isRecording}
+                  onClick={() => fileInputRef.current?.click()}
+                />
                 
                 <div className="flex-1 bg-slate-100 dark:bg-slate-900 rounded-3xl flex items-center px-4 py-2 border border-transparent focus-within:border-violet-500 transition-all">
                   <Smile size={20} className="text-slate-400 mr-2 shrink-0" />
-                  <input 
+                  <input
+                  disabled={isUploading || isRecording}
                     type="text"
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
@@ -1229,15 +1406,20 @@ const ChatView = () => {
                 </div>
 
                 {inputText.trim() ? (
-                  <button type="submit" className="bg-violet-600 hover:bg-violet-700 text-white p-3 rounded-2xl transition-transform active:scale-95 shadow-md shadow-violet-500/20">
+                  <button type="submit" disabled={isUploading || isRecording} className="bg-violet-600 hover:bg-violet-700 text-white p-3 rounded-2xl transition-transform active:scale-95 shadow-md shadow-violet-500/20 disabled:opacity-50">
                     <Send size={18} />
                   </button>
                 ) : (
-                  <button type="button" onClick={() => showToast('Type a message to send it live.')} title="Send a message" className="bg-slate-900 dark:bg-slate-800 text-white p-3 rounded-2xl hover:bg-slate-800 transition-transform active:scale-95">
-                    <Mic size={18} />
+                  <button type="button" onClick={handleVoiceRecord} disabled={isUploading} title={isRecording ? 'Stop and send voice note' : 'Record voice note'} className={`${isRecording ? 'bg-rose-600 hover:bg-rose-700' : 'bg-slate-900 dark:bg-slate-800 hover:bg-slate-800'} text-white p-3 rounded-2xl transition-transform active:scale-95 disabled:opacity-50`}>
+                    {isRecording ? <StopCircle size={18} /> : <Mic size={18} />}
                   </button>
                 )}
               </form>
+              {(isUploading || isRecording) && (
+                <p className="mx-auto mt-2 max-w-4xl text-center text-xs text-violet-600 dark:text-violet-400" role="status">
+                  {isRecording ? 'Recording… tap the stop button to send your voice note.' : 'Uploading attachment…'}
+                </p>
+              )}
             </div>
           </>
         ) : (

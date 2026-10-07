@@ -56,14 +56,66 @@ service cloud.firestore {
         allow read: if isChatMember(chatId);
         allow create: if isChatMember(chatId)
           && request.resource.data.keys().hasOnly([
-            'senderId', 'text', 'type', 'createdAt'
+            'senderId', 'text', 'type', 'createdAt',
+              'attachmentUrl', 'cloudinaryPublicId', 'cloudinaryResourceType',
+              'fileName', 'mimeType', 'fileSize', 'duration'
           ])
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.text is string
           && request.resource.data.text.size() > 0
           && request.resource.data.text.size() <= 4000
-          && request.resource.data.type == 'text'
-          && request.resource.data.createdAt == request.time;
+          && request.resource.data.createdAt == request.time
+          && (
+            request.resource.data.type == 'text'
+            && request.resource.data.keys().hasOnly([
+              'senderId', 'text', 'type', 'createdAt'
+            ])
+            ||
+            request.resource.data.type in ['image', 'video', 'document', 'voice']
+            && request.resource.data.keys().hasAll([
+              'attachmentUrl', 'cloudinaryPublicId', 'cloudinaryResourceType',
+              'fileName', 'mimeType', 'fileSize'
+            ])
+            && request.resource.data.attachmentUrl is string
+            && request.resource.data.attachmentUrl.matches('https://res.cloudinary.com/.*')
+            && request.resource.data.cloudinaryPublicId is string
+            && request.resource.data.cloudinaryResourceType in ['image', 'video', 'raw']
+            && request.resource.data.fileName is string
+            && request.resource.data.mimeType is string
+            && request.resource.data.fileSize is int
+            && request.resource.data.fileSize > 0
+            && request.resource.data.fileSize <= 52428800
+            && (
+              request.resource.data.type == 'image'
+              && request.resource.data.cloudinaryResourceType == 'image'
+              && request.resource.data.mimeType.matches('image/.*')
+              ||
+              request.resource.data.type == 'video'
+              && request.resource.data.cloudinaryResourceType == 'video'
+              && request.resource.data.mimeType.matches('video/.*')
+              ||
+              request.resource.data.type == 'voice'
+              && request.resource.data.cloudinaryResourceType == 'video'
+              && request.resource.data.mimeType.matches('audio/.*')
+              && request.resource.data.duration is int
+              ||
+              request.resource.data.type == 'document'
+              && request.resource.data.cloudinaryResourceType in ['image', 'raw']
+              && request.resource.data.mimeType in [
+                'application/pdf',
+                'application/msword',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'application/vnd.ms-excel',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/vnd.ms-powerpoint',
+                'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                'application/vnd.oasis.opendocument.text',
+                'application/rtf',
+                'text/rtf',
+                'text/plain'
+              ]
+            )
+          );
         allow update, delete: if false;
       }
     }
