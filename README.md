@@ -22,6 +22,17 @@ Vibely is a React and Vite chat app backed by Firebase Authentication and Cloud 
 
 The Cloudinary API secret stays server-side. The upload API verifies Firebase ID tokens and verifies the user's chat membership before signing Cloudinary uploads. Cloudinary hosts attachments; Firestore rules restrict attachment-message creation to signed-in chat members. The app limits attachments to 50 MB. Voice recording requires microphone permission and a secure browser context (HTTPS or localhost).
 
+## Vercel deployment
+
+Vercel serves the Vite frontend and the serverless signing endpoint at `/api/cloudinary/signature` from `api/cloudinary/signature.js`. In the Vercel project settings, add these environment variables for the Production environment (and Preview if needed):
+
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET` (store as a secret; do not use a `VITE_` prefix)
+- `FIREBASE_PROJECT_ID` (`vibely-app-68415`)
+
+Redeploy the project after adding the variables. Do not put the Cloudinary API secret in frontend code or a committed file: Vite bundles frontend code for browsers, where embedded secrets are public.
+
 ## Cloudflare Pages deployment
 
 This repository includes a Cloudflare Pages Function at `functions/api/cloudinary/signature.js`. Cloudflare Pages deploys it at `/api/cloudinary/signature` alongside the static Vite frontend, so no separate Node upload service or `VITE_UPLOAD_API_URL` is needed.

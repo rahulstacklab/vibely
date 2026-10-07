@@ -13,7 +13,7 @@ const parseResponse = async (response) => {
   if (!response.ok) {
     if (response.status === 405 || !contentType.includes('application/json')) {
       throw new Error(
-        'The upload-signing API is not deployed or routed for this live site. Deploy server/index.js and set VITE_UPLOAD_API_URL to its public base URL.'
+        'The upload-signing API is not deployed or routed for this live site. Deploy the /api/cloudinary/signature serverless function, or set VITE_UPLOAD_API_URL to a deployed API base URL.'
       );
     }
     throw new Error(payload?.error || `Upload failed (HTTP ${response.status}).`);

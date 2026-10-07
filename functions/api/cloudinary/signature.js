@@ -27,7 +27,7 @@ export async function onRequestPost({ request, env }) {
   const projectId = env.FIREBASE_PROJECT_ID || 'vibely-app-68415';
 
   if (!cloudName || !apiKey || !apiSecret) {
-    return json({ error: 'Cloudinary signing is not configured on Cloudflare Pages.' }, 503);
+    return json({ error: 'Cloudinary signing is not configured on the server.' }, 503);
   }
 
   try {
