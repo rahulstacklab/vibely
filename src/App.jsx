@@ -220,12 +220,6 @@ const MOCK_CHATS = [
   }
 ];
 
-const MOCK_CIRCLES = [
-  { id: 'cir1', name: 'Inner Circle', icon: Lock, members: 12, color: 'bg-gradient-to-r from-violet-500 to-indigo-600', description: 'Close friends & core updates.' },
-  { id: 'cir2', name: 'Design Squad', icon: Laptop, members: 8, color: 'bg-gradient-to-r from-pink-500 to-rose-500', description: 'Figma prototypes and feedback.' },
-  { id: 'cir3', name: 'Coffee & Tech', icon: Coffee, members: 24, color: 'bg-gradient-to-r from-amber-500 to-orange-500', description: 'Weekend coffee meetups & tech chatter.' }
-];
-
 const MOCK_MOMENTS = [
   {
     id: 'mom1',
@@ -493,7 +487,6 @@ const DataProvider = ({ children }) => {
       : update
   })), [user?.uid]);
   const [stories, setStories] = useState(MOCK_STORIES);
-  const [circles, setCircles] = useState(MOCK_CIRCLES);
   const [moments, setMoments] = useState(MOCK_MOMENTS);
   const [savedMessages, setSavedMessages] = useState([]);
   const [activeCall, setActiveCall] = useState(null); // { user, type: 'voice' | 'video' }
@@ -629,7 +622,7 @@ const DataProvider = ({ children }) => {
             throw error;
           }
         }
-        navigate('/chats', { chatId });
+        navigate('/groups', { chatId });
       } catch (error) {
         console.error('Unable to join group from invite link.', error);
         showToast(`Couldn't join group: ${error.message}`);
@@ -1033,19 +1026,14 @@ const DataProvider = ({ children }) => {
     showToast('Vote recorded!');
   };
 
-  const createCircle = (newCircle) => {
-    setCircles(prev => [...prev, { ...newCircle, id: `cir_${Date.now()}`, members: 1 }]);
-    showToast('New Circle created!');
-  };
-
   return (
     <DataContext.Provider value={{
-      chats, users, stories, circles, moments, savedMessages, activeCall, toastMessage,
+      chats, users, stories, moments, savedMessages, activeCall, toastMessage,
       createChat, createGroup, joinGroup, addGroupMembers, removeGroupMember,
       promoteGroupAdmin, renameGroup, rotateGroupInvite, leaveGroup,
       sendMessage, sendAttachment, editMessage, deleteMessage, hideConversation,
       hideMessageForMe,
-      addReaction, forwardMessage, toggleSaveMessage, votePoll, createCircle,
+      addReaction, forwardMessage, toggleSaveMessage, votePoll,
       setActiveCall, showToast
     }}>
       {children}
@@ -1124,7 +1112,7 @@ const Sidebar = () => {
   const navItems = [
     { id: '/', icon: Home, label: 'Feed & Home' },
     { id: '/chats', icon: MessageCircle, label: 'Chats', badge: true },
-    { id: '/circles', icon: Users, label: 'Private Circles' },
+    { id: '/groups', icon: Users, label: 'Groups' },
     { id: '/moments', icon: Sparkles, label: 'Moments' },
     { id: '/discover', icon: CompassIcon, label: 'Discover & Vibe' },
     { id: '/saved', icon: Bookmark, label: 'Saved Messages' },
@@ -1210,7 +1198,7 @@ const BottomNav = () => {
   const navItems = [
     { id: '/', icon: Home, label: 'Home' },
     { id: '/chats', icon: MessageCircle, label: 'Chats', badge: true },
-    { id: '/circles', icon: Users, label: 'Circles' },
+    { id: '/groups', icon: Users, label: 'Groups' },
     { id: '/moments', icon: Sparkles, label: 'Moments' },
     { id: '/profile', icon: User, label: 'Profile', avatar: user?.avatar }
   ];
@@ -1378,7 +1366,7 @@ const DashboardView = () => {
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: 'New Chat', icon: MessageCircle, color: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400', path: '/chats' },
-            { label: 'Create Circle', icon: Users, color: 'bg-violet-500/10 text-violet-600 dark:text-violet-400', path: '/circles' },
+            { label: 'Open Groups', icon: Users, color: 'bg-violet-500/10 text-violet-600 dark:text-violet-400', path: '/groups' },
             { label: 'Mood Match', icon: Flame, color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400', path: '/discover' },
             { label: 'Moments Feed', icon: Sparkles, color: 'bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400', path: '/moments' }
           ].map((item, idx) => {
@@ -1447,7 +1435,7 @@ const DashboardView = () => {
               return (
                 <div 
                   key={chat.id} 
-                  onClick={() => navigate('/chats', { chatId: chat.id })}
+                  onClick={() => navigate(isGroup ? '/groups' : '/chats', { chatId: chat.id })}
                   className="flex items-center p-3.5 hover:bg-slate-50 dark:hover:bg-slate-900/60 rounded-2xl cursor-pointer transition-colors"
                 >
                   {isGroup ? (
@@ -1500,9 +1488,10 @@ const ChatView = () => {
     toggleSaveMessage, votePoll,
     setActiveCall, showToast
   } = useContext(DataContext);
-  const { routeParams, navigate } = useContext(RouterContext);
+  const { routeParams, navigate, currentRoute } = useContext(RouterContext);
   const { user } = useContext(AuthContext);
 
+  const isGroupsRoute = currentRoute === '/groups';
   const activeChatId = routeParams.chatId || null;
   const [inputText, setInputText] = useState('');
   const [showTranslation, setShowTranslation] = useState({});
@@ -1528,6 +1517,7 @@ const ChatView = () => {
 
   const activeChat = chats.find(c => c.id === activeChatId);
   const isGroup = activeChat?.isGroup;
+  const visibleChats = chats.filter(chat => Boolean(chat.isGroup) === isGroupsRoute);
   const otherUser = !isGroup ? users.find(u => activeChat?.participants.includes(u.id) && u.id !== user.id) : null;
 
   useEffect(() => {
@@ -1613,7 +1603,7 @@ const ChatView = () => {
     try {
       await hideConversation(activeChat.id);
       setShowChatOptions(false);
-      navigate('/chats');
+      navigate(isGroup ? '/groups' : '/chats');
       showToast('Conversation removed from your chat list.');
     } catch (error) {
       console.error('Unable to remove conversation.', error);
@@ -1654,7 +1644,7 @@ const ChatView = () => {
       const chatId = await createGroup(newGroupName);
       setShowCreateGroup(false);
       setNewGroupName('');
-      navigate('/chats', { chatId });
+      navigate('/groups', { chatId });
       showToast('Group created. Invite members from Group info.');
     } catch (error) {
       console.error('Unable to create group.', error);
@@ -1676,7 +1666,7 @@ const ChatView = () => {
       const chatId = await joinGroup(inviteCode);
       setShowJoinGroup(false);
       setGroupInviteInput('');
-      navigate('/chats', { chatId });
+      navigate('/groups', { chatId });
       showToast('You joined the group.');
     } catch (error) {
       console.error('Unable to join group.', error);
@@ -1775,12 +1765,44 @@ const ChatView = () => {
       {/* Conversations Sidebar (Left) */}
       <div className={`w-full md:w-80 lg:w-96 min-w-0 bg-white dark:bg-slate-950 border-r border-slate-200/80 dark:border-slate-800/80 flex flex-col ${routeParams.chatId ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Messages</h1>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white">{isGroupsRoute ? 'Groups' : 'Chats'}</h1>
           <div className="flex items-center space-x-1">
-            <IconButton icon={Plus} title="New Chat" onClick={() => navigate('/discover')} />
-            <IconButton icon={Users} title="Create group" onClick={() => setShowCreateGroup(true)} />
-            <IconButton icon={Link2} title="Join group" onClick={() => setShowJoinGroup(true)} />
+            {isGroupsRoute ? (
+              <>
+                <IconButton icon={Users} title="Create group" onClick={() => setShowCreateGroup(true)} />
+                <IconButton icon={Link2} title="Join group" onClick={() => setShowJoinGroup(true)} />
+              </>
+            ) : (
+              <IconButton icon={Plus} title="New Chat" onClick={() => navigate('/discover')} />
+            )}
           </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1 border-b border-slate-100 bg-slate-50 p-2 dark:border-slate-800 dark:bg-slate-900">
+          <button
+            type="button"
+            onClick={() => navigate('/chats')}
+            aria-current={!isGroupsRoute ? 'page' : undefined}
+            className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+              !isGroupsRoute
+                ? 'bg-white text-violet-700 shadow-sm dark:bg-slate-800 dark:text-violet-300'
+                : 'text-slate-500 hover:bg-white/70 dark:hover:bg-slate-800'
+            }`}
+          >
+            Chats
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/groups')}
+            aria-current={isGroupsRoute ? 'page' : undefined}
+            className={`rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+              isGroupsRoute
+                ? 'bg-white text-violet-700 shadow-sm dark:bg-slate-800 dark:text-violet-300'
+                : 'text-slate-500 hover:bg-white/70 dark:hover:bg-slate-800'
+            }`}
+          >
+            Groups
+          </button>
         </div>
 
         {/* Search Chat */}
@@ -1797,7 +1819,7 @@ const ChatView = () => {
 
         {/* Chat List */}
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/50 p-2 space-y-1">
-          {chats.map(chat => {
+          {visibleChats.map(chat => {
             const chatIsGroup = chat.isGroup;
             const targetUser = !chatIsGroup ? users.find(u => chat.participants.includes(u.id) && u.id !== user.id) : null;
             const lastMsg = chat.messages[chat.messages.length - 1];
@@ -1807,7 +1829,7 @@ const ChatView = () => {
               <div 
                 key={chat.id}
                 onClick={() => {
-                  navigate('/chats', { chatId: chat.id });
+                  navigate(chatIsGroup ? '/groups' : '/chats', { chatId: chat.id });
                 }}
                 className={`flex items-center p-3 rounded-2xl cursor-pointer transition-all ${isSelected ? 'bg-violet-50 dark:bg-violet-950/40 border border-violet-200/50 dark:border-violet-900/40' : 'hover:bg-slate-50 dark:hover:bg-slate-900/50'}`}
               >
@@ -1833,6 +1855,27 @@ const ChatView = () => {
               </div>
             );
           })}
+          {visibleChats.length === 0 && (
+            <div className="p-6 text-center">
+              <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                {isGroupsRoute ? 'No groups yet' : 'No conversations yet'}
+              </p>
+              {isGroupsRoute ? (
+                <div className="mt-3 flex justify-center gap-2">
+                  <button type="button" onClick={() => setShowCreateGroup(true)} className="rounded-xl bg-violet-600 px-3 py-2 text-xs font-semibold text-white hover:bg-violet-700">
+                    Create group
+                  </button>
+                  <button type="button" onClick={() => setShowJoinGroup(true)} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-violet-600 hover:bg-violet-50 dark:border-slate-700 dark:hover:bg-slate-800">
+                    Join group
+                  </button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => navigate('/discover')} className="mt-2 text-xs font-semibold text-violet-600 hover:underline dark:text-violet-400">
+                  Find someone to message
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1843,7 +1886,7 @@ const ChatView = () => {
             {/* Header */}
             <div className="bg-white dark:bg-slate-950 p-3.5 border-b border-slate-200/80 dark:border-slate-800/80 flex items-center justify-between shadow-sm sticky top-0 z-10">
               <div className="flex items-center space-x-3">
-                <button onClick={() => navigate('/chats')} className="md:hidden text-slate-500">
+                <button onClick={() => navigate(isGroup ? '/groups' : '/chats')} className="md:hidden text-slate-500">
                   <ChevronLeft size={22} />
                 </button>
                 {isGroup ? (
@@ -2325,7 +2368,7 @@ const ChatView = () => {
           onLeave={async () => {
             await leaveGroup(activeChat.id);
             setShowGroupManagement(false);
-            navigate('/chats');
+            navigate('/groups');
           }}
           onError={error => showToast(`Group action failed: ${error.message}`)}
           onSuccess={showToast}
@@ -2660,86 +2703,6 @@ const StoriesView = () => {
   );
 };
 
-const CirclesView = () => {
-  const { circles, createCircle } = useContext(DataContext);
-  const [showModal, setShowModal] = useState(false);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-
-  const handleCreate = (e) => {
-    e.preventDefault();
-    if (!name) return;
-    createCircle({ name, description, icon: Lock, color: 'bg-gradient-to-r from-violet-500 to-indigo-600' });
-    setName('');
-    setDescription('');
-    setShowModal(false);
-  };
-
-  return (
-    <div className="flex-1 p-4 md:p-8 bg-slate-50 dark:bg-slate-900 overflow-y-auto pb-24 md:pb-8">
-      <div className="max-w-5xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Private Circles</h1>
-            <p className="text-xs text-slate-500">Selective social spaces with custom privacy boundaries.</p>
-          </div>
-          <button onClick={() => setShowModal(true)} className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 rounded-2xl flex items-center space-x-2 text-xs font-bold transition-all shadow-md shadow-violet-500/20">
-            <Plus size={16} />
-            <span>New Circle</span>
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {circles.map(circle => {
-            const Icon = circle.icon || Lock;
-            return (
-              <div key={circle.id} className="bg-white dark:bg-slate-950 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm hover:shadow-md transition-shadow">
-                <div className={`w-12 h-12 rounded-2xl ${circle.color} text-white flex items-center justify-center mb-4 shadow-lg`}>
-                  <Icon size={22} />
-                </div>
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">{circle.name}</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">{circle.description}</p>
-                <div className="flex justify-between items-center pt-4 border-t border-slate-100 dark:border-slate-800">
-                  <span className="text-xs font-semibold text-slate-400">{circle.members} Members</span>
-                  <button className="text-xs font-bold text-violet-600 dark:text-violet-400 hover:underline">Open Circle</button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-slate-950 max-w-md w-full p-6 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white">Create Private Circle</h2>
-            <form onSubmit={handleCreate} className="space-y-3">
-              <input 
-                type="text" 
-                placeholder="Circle Name (e.g., Founders Club)" 
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-white p-3 rounded-2xl text-xs border border-transparent focus:border-violet-500 focus:outline-none"
-              />
-              <textarea 
-                placeholder="Description & purpose..." 
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-white p-3 rounded-2xl text-xs border border-transparent focus:border-violet-500 focus:outline-none h-20 resize-none"
-              />
-              <div className="flex justify-end space-x-2 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 rounded-2xl text-xs font-semibold text-slate-500">Cancel</button>
-                <button type="submit" className="bg-violet-600 text-white px-4 py-2 rounded-2xl text-xs font-bold">Create</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
 const MomentsView = () => {
   const { moments } = useContext(DataContext);
 
@@ -2787,7 +2750,7 @@ const DiscoverView = () => {
   const messageUser = async (targetUser) => {
     try {
       const chatId = await createChat(targetUser);
-      navigate('/chats', { chatId });
+      navigate('/groups', { chatId });
     } catch (error) {
       console.error('Unable to start chat.', error);
       showToast(`Couldn't start chat: ${error.message}`);
@@ -3155,9 +3118,8 @@ const MainAppLayout = () => {
 
   const renderCurrentView = () => {
     if (currentRoute === '/') return <DashboardView />;
-    if (currentRoute === '/chats') return <ChatView />;
+    if (currentRoute === '/chats' || currentRoute === '/groups') return <ChatView />;
     if (currentRoute === '/stories') return <StoriesView />;
-    if (currentRoute === '/circles') return <CirclesView />;
     if (currentRoute === '/moments') return <MomentsView />;
     if (currentRoute === '/discover') return <DiscoverView />;
     if (currentRoute === '/saved') return <SavedMessagesView />;
