@@ -22,6 +22,12 @@ Vibely is a React and Vite chat app backed by Firebase Authentication and Cloud 
 
 The Cloudinary API secret stays server-side. The upload API verifies Firebase ID tokens and verifies the user's chat membership before signing Cloudinary uploads. Cloudinary hosts attachments; Firestore rules restrict attachment-message creation to signed-in chat members. The app limits attachments to 50 MB. Voice recording requires microphone permission and a secure browser context (HTTPS or localhost).
 
+Firebase Authentication uses browser-local persistence so a user remains signed in after refreshes and browser restarts. Signing out still requires an explicit logout, except when the user clears browser site data or Firebase invalidates the account session.
+
+## Editing and deleting chats
+
+Chat participants can edit their own text messages, forward text and attachments to another conversation, and add one persistent emoji reaction per user to a message. The delete menu offers **Delete for everyone** (only on your own messages) and **Delete for me** (hides any message only from your view); **Cancel** closes the menu. The chat menu's **Remove conversation** action hides that conversation only from the current user's chat list and keeps the other participant's history. Publish the updated `firestore.rules` when deploying these features so Firestore enforces the same permissions.
+
 ## Vercel deployment
 
 Vercel serves the Vite frontend and the serverless signing endpoint at `/api/cloudinary/signature` from `api/cloudinary/signature.js`. In the Vercel project settings, add these environment variables for the Production environment (and Preview if needed):

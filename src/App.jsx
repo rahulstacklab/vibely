@@ -1,14 +1,19 @@
 /* eslint-disable no-unused-vars */
 import { useState, useEffect, useContext, createContext, useRef, useCallback } from 'react';
 import {
+  browserLocalPersistence,
   createUserWithEmailAndPassword,
   onAuthStateChanged,
+  setPersistence,
   signInWithEmailAndPassword,
   signOut,
   updateProfile
 } from 'firebase/auth';
 import {
+  arrayUnion,
   collection,
+  deleteDoc,
+  deleteField,
   doc,
   getDoc,
   onSnapshot,
@@ -16,6 +21,7 @@ import {
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where,
   writeBatch
 } from 'firebase/firestore';
@@ -27,7 +33,7 @@ import {
   CheckCheck, Sun, Moon, LogOut, Bell, ChevronLeft, Heart,
   Activity, X, Lock, Coffee, Laptop, Flame,
   Sparkles, Filter, Globe, Sliders, Bookmark,
-  ShieldAlert, PhoneOff, MicOff, VideoOff, FileText, StopCircle
+  ShieldAlert, PhoneOff, MicOff, VideoOff, FileText, StopCircle, Pencil, Trash2
 } from 'lucide-react';
 
 const DEMO_ACCOUNTS = [
@@ -248,6 +254,8 @@ const ThemeContext = createContext();
 const AuthContext = createContext();
 const RouterContext = createContext();
 const DataContext = createContext();
+let localAuthPersistencePromise;
+const MESSAGE_REACTIONS = ['❤️', '😂', '😮', '😢', '🙏', '👍', '🔥', '🎉'];
 const ATTACHMENT_MIME_TYPES = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -317,44 +325,78 @@ const ThemeProvider = ({ children }) => {
 const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
   const [isOnboarding, setIsOnboarding] = useState(false);
 
-  useEffect(() => onAuthStateChanged(auth, async (firebaseUser) => {
-    if (!firebaseUser) {
-      setUser(null);
-      setAuthLoading(false);
-      return;
-    }
+  useEffect(() => {
+    let isActive = true;
+    let unsubscribe;
+    let authEvent = 0;
 
-    try {
-      const profileSnapshot = await getDoc(doc(db, 'users', firebaseUser.uid));
-      const profile = profileSnapshot.exists() ? profileSnapshot.data() : {};
-      setUser({
-        id: firebaseUser.uid,
-        uid: firebaseUser.uid,
-        name: profile.name || firebaseUser.displayName || firebaseUser.email,
-        username: profile.username || `@${firebaseUser.email?.split('@')[0] || 'vibely'}`,
-        avatar: profile.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=250&q=80',
-        vibe: profile.vibe || '✨ Here to connect',
-        bio: profile.bio || '',
-        role: 'user'
-      });
-    } catch (error) {
-      console.error('Unable to load the signed-in user profile.', error);
-      setUser({
-        id: firebaseUser.uid,
-        uid: firebaseUser.uid,
-        name: firebaseUser.displayName || firebaseUser.email,
-        username: `@${firebaseUser.email?.split('@')[0] || 'vibely'}`,
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=250&q=80',
-        vibe: '✨ Here to connect',
-        bio: '',
-        role: 'user'
-      });
-    } finally {
-      setAuthLoading(false);
-    }
-  }), []);
+    const startAuthListener = async () => {
+      try {
+        localAuthPersistencePromise ||= setPersistence(auth, browserLocalPersistence);
+        await localAuthPersistencePromise;
+        if (!isActive) return;
+
+        unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+          const currentEvent = ++authEvent;
+          if (!firebaseUser) {
+            setUser(null);
+            setAuthLoading(false);
+            return;
+          }
+
+          const fallbackProfile = {
+            id: firebaseUser.uid,
+            uid: firebaseUser.uid,
+            name: firebaseUser.displayName || firebaseUser.email,
+            username: `@${firebaseUser.email?.split('@')[0] || 'vibely'}`,
+            avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=250&q=80',
+            vibe: '✨ Here to connect',
+            bio: '',
+            role: 'user'
+          };
+
+          try {
+            const profileSnapshot = await getDoc(doc(db, 'users', firebaseUser.uid));
+            const profile = profileSnapshot.exists() ? profileSnapshot.data() : {};
+            if (!isActive || currentEvent !== authEvent || auth.currentUser?.uid !== firebaseUser.uid) return;
+            setUser({
+              ...fallbackProfile,
+              name: profile.name || fallbackProfile.name,
+              username: profile.username || fallbackProfile.username,
+              avatar: profile.avatar || fallbackProfile.avatar,
+              vibe: profile.vibe || fallbackProfile.vibe,
+              bio: profile.bio || ''
+            });
+          } catch (error) {
+            console.error('Unable to load the signed-in user profile.', error);
+            if (!isActive || currentEvent !== authEvent || auth.currentUser?.uid !== firebaseUser.uid) return;
+            setUser(fallbackProfile);
+          } finally {
+            if (isActive && currentEvent === authEvent) setAuthLoading(false);
+          }
+        }, (error) => {
+          console.error('Firebase authentication state listener failed.', error);
+          if (!isActive) return;
+          setAuthError(`Could not restore your sign-in: ${error.message}`);
+          setAuthLoading(false);
+        });
+      } catch (error) {
+        console.error('Unable to enable persistent sign-in.', error);
+        if (!isActive) return;
+        setAuthError(`Could not enable persistent sign-in: ${error.message}`);
+        setAuthLoading(false);
+      }
+    };
+
+    startAuthListener();
+    return () => {
+      isActive = false;
+      unsubscribe?.();
+    };
+  }, []);
 
   const login = (email, password) => signInWithEmailAndPassword(auth, email, password);
 
@@ -383,7 +425,7 @@ const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, login, logout, register, authLoading, isOnboarding, setIsOnboarding }}>
+    <AuthContext.Provider value={{ user, setUser, login, logout, register, authLoading, authError, isOnboarding, setIsOnboarding }}>
       {children}
     </AuthContext.Provider>
   );
@@ -456,7 +498,10 @@ const DataProvider = ({ children }) => {
       where('participants', 'array-contains', user.uid)
     );
     const unsubscribeChats = onSnapshot(chatQuery, (snapshot) => {
-      const chatIds = new Set(snapshot.docs.map(chatDoc => chatDoc.id));
+      const visibleChatDocs = snapshot.docs.filter(chatDoc =>
+        !chatDoc.data().hiddenFor?.includes(user.uid)
+      );
+      const chatIds = new Set(visibleChatDocs.map(chatDoc => chatDoc.id));
       messageSubscriptions.forEach((unsubscribe, chatId) => {
         if (!chatIds.has(chatId)) {
           unsubscribe();
@@ -464,7 +509,7 @@ const DataProvider = ({ children }) => {
         }
       });
 
-      setChats(previousChats => snapshot.docs.map(chatDoc => {
+      setChats(previousChats => visibleChatDocs.map(chatDoc => {
         const existingChat = previousChats.find(chat => chat.id === chatDoc.id);
         return {
           id: chatDoc.id,
@@ -478,7 +523,7 @@ const DataProvider = ({ children }) => {
         return secondTime - firstTime;
       }));
 
-      snapshot.docs.forEach((chatDoc) => {
+      visibleChatDocs.forEach((chatDoc) => {
         if (messageSubscriptions.has(chatDoc.id)) return;
 
         const messagesQuery = query(
@@ -489,7 +534,9 @@ const DataProvider = ({ children }) => {
           setChats(previousChats => previousChats.map(chat => chat.id === chatDoc.id
             ? {
               ...chat,
-              messages: messagesSnapshot.docs.map(messageDoc => {
+              messages: messagesSnapshot.docs
+                .filter(messageDoc => !messageDoc.data().hiddenFor?.includes(user.uid))
+                .map(messageDoc => {
                 const message = messageDoc.data();
                 return {
                   id: messageDoc.id,
@@ -607,22 +654,114 @@ const DataProvider = ({ children }) => {
     await batch.commit();
   };
 
-  const addReaction = (chatId, messageId, emoji) => {
-    setChats(prev => prev.map(chat => {
-      if (chat.id === chatId) {
-        return {
-          ...chat,
-          messages: chat.messages.map(m => {
-            if (m.id === messageId) {
-              const reactions = m.reactions ? [...m.reactions, emoji] : [emoji];
-              return { ...m, reactions };
-            }
-            return m;
-          })
-        };
-      }
-      return chat;
-    }));
+  const editMessage = async (chatId, messageId, text) => {
+    const cleanText = text.trim();
+    if (!cleanText || cleanText.length > 4000) {
+      throw new Error('Messages must contain 1–4000 characters.');
+    }
+    const chat = chats.find(item => item.id === chatId);
+    const message = chat?.messages.find(item => item.id === messageId);
+    if (!user?.uid || message?.senderId !== user.uid || message.type !== 'text') {
+      throw new Error('Only your own text messages can be edited.');
+    }
+
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'chats', chatId, 'messages', messageId), {
+      text: cleanText,
+      editedAt: serverTimestamp()
+    });
+    if (chat.messages.at(-1)?.id === messageId) {
+      batch.update(doc(db, 'chats', chatId), {
+        lastMessage: cleanText,
+        updatedAt: serverTimestamp()
+      });
+    }
+    await batch.commit();
+  };
+
+  const deleteMessage = async (chatId, messageId) => {
+    const chat = chats.find(item => item.id === chatId);
+    const messageIndex = chat?.messages.findIndex(item => item.id === messageId) ?? -1;
+    const message = chat?.messages[messageIndex];
+    if (!user?.uid || message?.senderId !== user.uid) {
+      throw new Error('You can only delete your own messages.');
+    }
+
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'chats', chatId, 'messages', messageId));
+    if (messageIndex === chat.messages.length - 1) {
+      batch.update(doc(db, 'chats', chatId), {
+        lastMessage: chat.messages[messageIndex - 1]?.text || '',
+        updatedAt: serverTimestamp()
+      });
+    }
+    await batch.commit();
+  };
+
+  const hideMessageForMe = async (chatId, messageId) => {
+    if (!user?.uid) throw new Error('Sign in before deleting a message.');
+    await updateDoc(doc(db, 'chats', chatId, 'messages', messageId), {
+      hiddenFor: arrayUnion(user.uid)
+    });
+  };
+
+  const hideConversation = async (chatId) => {
+    if (!user?.uid) throw new Error('Sign in before deleting a conversation.');
+    await updateDoc(doc(db, 'chats', chatId), {
+      hiddenFor: arrayUnion(user.uid)
+    });
+  };
+
+  const addReaction = async (chatId, messageId, emoji) => {
+    if (!user?.uid) throw new Error('Sign in before reacting to a message.');
+    const message = chats.find(chat => chat.id === chatId)?.messages
+      .find(item => item.id === messageId);
+    if (!message) throw new Error('This message is no longer available.');
+
+    const hasReacted = message.reactions?.[user.uid] === emoji;
+    await updateDoc(doc(db, 'chats', chatId, 'messages', messageId), {
+      [`reactions.${user.uid}`]: hasReacted ? deleteField() : emoji
+    });
+  };
+
+  const forwardMessage = async (sourceChatId, message, targetChatId) => {
+    if (!user?.uid) throw new Error('Sign in before forwarding a message.');
+    if (!message || message.type === 'poll') {
+      throw new Error('This message type cannot be forwarded.');
+    }
+    const targetChat = chats.find(chat => chat.id === targetChatId);
+    if (!targetChat || targetChatId === sourceChatId) {
+      throw new Error('Choose a different conversation to forward this message.');
+    }
+
+    const forwardedMessage = {
+      senderId: user.uid,
+      text: message.text || (message.type === 'voice' ? 'Voice note' : 'Attachment'),
+      type: message.type,
+      createdAt: serverTimestamp(),
+      forwardedFrom: users.find(profile => profile.id === message.senderId)?.name || 'Vibely member'
+    };
+    if (message.type !== 'text') {
+      Object.assign(forwardedMessage, {
+        attachmentUrl: message.attachmentUrl,
+        cloudinaryPublicId: message.cloudinaryPublicId,
+        cloudinaryResourceType: message.cloudinaryResourceType,
+        fileName: message.fileName,
+        mimeType: message.mimeType,
+        fileSize: message.fileSize
+      });
+      if (message.duration !== undefined) forwardedMessage.duration = message.duration;
+    }
+
+    const messageRef = doc(collection(db, 'chats', targetChatId, 'messages'));
+    const batch = writeBatch(db);
+    batch.set(messageRef, forwardedMessage);
+    batch.update(doc(db, 'chats', targetChatId), {
+      lastMessage: forwardedMessage.text,
+      updatedAt: serverTimestamp(),
+      hiddenFor: (targetChat.hiddenFor || []).filter(uid => uid !== user.uid)
+    });
+    await batch.commit();
   };
 
   const toggleSaveMessage = (message) => {
@@ -664,7 +803,9 @@ const DataProvider = ({ children }) => {
   return (
     <DataContext.Provider value={{
       chats, users, stories, circles, moments, savedMessages, activeCall, toastMessage,
-      createChat, sendMessage, sendAttachment, addReaction, toggleSaveMessage, votePoll, createCircle,
+      createChat, sendMessage, sendAttachment, editMessage, deleteMessage, hideConversation,
+      hideMessageForMe,
+      addReaction, forwardMessage, toggleSaveMessage, votePoll, createCircle,
       setActiveCall, showToast
     }}>
       {children}
@@ -1048,13 +1189,25 @@ const DashboardView = () => {
 };
 
 const ChatView = () => {
-  const { chats, users, createChat, sendMessage, sendAttachment, addReaction, toggleSaveMessage, votePoll, setActiveCall, showToast } = useContext(DataContext);
+  const {
+    chats, users, createChat, sendMessage, sendAttachment, editMessage,
+    deleteMessage, hideMessageForMe, hideConversation, addReaction, forwardMessage,
+    toggleSaveMessage, votePoll,
+    setActiveCall, showToast
+  } = useContext(DataContext);
   const { routeParams, navigate } = useContext(RouterContext);
   const { user } = useContext(AuthContext);
 
   const activeChatId = routeParams.chatId || null;
   const [inputText, setInputText] = useState('');
   const [showTranslation, setShowTranslation] = useState({});
+  const [editingMessageId, setEditingMessageId] = useState(null);
+  const [editingText, setEditingText] = useState('');
+  const [deleteOptionsMessageId, setDeleteOptionsMessageId] = useState(null);
+  const [reactionPickerMessageId, setReactionPickerMessageId] = useState(null);
+  const [forwardingMessage, setForwardingMessage] = useState(null);
+  const [isForwarding, setIsForwarding] = useState(false);
+  const [showChatOptions, setShowChatOptions] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const messagesEndRef = useRef(null);
@@ -1080,6 +1233,72 @@ const ChatView = () => {
         console.error('Unable to send message.', error);
         showToast(`Couldn't send message: ${error.message}`);
       });
+  };
+
+  const handleSaveEdit = async (messageId) => {
+    try {
+      await editMessage(activeChat.id, messageId, editingText);
+      setEditingMessageId(null);
+      setEditingText('');
+      showToast('Message updated.');
+    } catch (error) {
+      console.error('Unable to edit message.', error);
+      showToast(`Couldn't edit message: ${error.message}`);
+    }
+  };
+
+  const handleDeleteMessage = async (messageId, scope) => {
+    try {
+      if (scope === 'everyone') {
+        await deleteMessage(activeChat.id, messageId);
+        showToast('Message deleted for everyone.');
+      } else {
+        await hideMessageForMe(activeChat.id, messageId);
+        showToast('Message deleted for you.');
+      }
+      setDeleteOptionsMessageId(null);
+    } catch (error) {
+      console.error('Unable to delete message.', error);
+      showToast(`Couldn't delete message: ${error.message}`);
+    }
+  };
+
+  const handleHideConversation = async () => {
+    if (!window.confirm('Remove this conversation from your chat list? The other participant will still have their copy.')) return;
+    try {
+      await hideConversation(activeChat.id);
+      setShowChatOptions(false);
+      navigate('/chats');
+      showToast('Conversation removed from your chat list.');
+    } catch (error) {
+      console.error('Unable to remove conversation.', error);
+      showToast(`Couldn't remove conversation: ${error.message}`);
+    }
+  };
+
+  const handleReaction = async (messageId, emoji) => {
+    try {
+      await addReaction(activeChat.id, messageId, emoji);
+      setReactionPickerMessageId(null);
+    } catch (error) {
+      console.error('Unable to react to message.', error);
+      showToast(`Couldn't add reaction: ${error.message}`);
+    }
+  };
+
+  const handleForwardMessage = async (targetChatId) => {
+    if (!forwardingMessage || isForwarding) return;
+    setIsForwarding(true);
+    try {
+      await forwardMessage(activeChat.id, forwardingMessage, targetChatId);
+      setForwardingMessage(null);
+      showToast('Message forwarded.');
+    } catch (error) {
+      console.error('Unable to forward message.', error);
+      showToast(`Couldn't forward message: ${error.message}`);
+    } finally {
+      setIsForwarding(false);
+    }
   };
 
   const handleAttachmentSelected = async (event) => {
@@ -1254,10 +1473,26 @@ const ChatView = () => {
                 </div>
               </div>
 
-              <div className="flex items-center space-x-1">
+              <div className="relative flex items-center space-x-1">
                 <IconButton icon={Phone} title="Voice Call" onClick={() => setActiveCall({ user: otherUser, type: 'voice' })} />
                 <IconButton icon={Video} title="Video Call" onClick={() => setActiveCall({ user: otherUser, type: 'video' })} />
-                <IconButton icon={MoreVertical} title="Chat Options" />
+                <IconButton
+                  icon={MoreVertical}
+                  title="Chat Options"
+                  onClick={() => setShowChatOptions(value => !value)}
+                />
+                {showChatOptions && (
+                  <div className="absolute right-0 top-full z-20 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                    <button
+                      type="button"
+                      onClick={handleHideConversation}
+                      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                    >
+                      <Trash2 size={16} />
+                      Remove conversation
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1271,6 +1506,10 @@ const ChatView = () => {
 
               {activeChat.messages.map((msg) => {
                 const isMe = msg.senderId === user.id;
+                const reactionCounts = Object.values(msg.reactions || {}).reduce((counts, emoji) => ({
+                  ...counts,
+                  [emoji]: (counts[emoji] || 0) + 1
+                }), {});
 
                 return (
                   <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} group`}>
@@ -1279,6 +1518,13 @@ const ChatView = () => {
                       {/* Bubble */}
                       <div className={`p-3.5 rounded-3xl shadow-sm relative text-sm ${isMe ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white rounded-br-xs' : 'bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-bl-xs border border-slate-200/80 dark:border-slate-800/80'}`}>
                         
+                        {msg.forwardedFrom && (
+                          <p className="mb-2 flex items-center gap-1 text-xs italic opacity-75">
+                            <Send size={12} />
+                            Forwarded from {msg.forwardedFrom}
+                          </p>
+                        )}
+
                         {/* Voice Message Player Layout */}
                         {msg.type === 'voice' ? (
                           <div className="space-y-2">
@@ -1334,6 +1580,47 @@ const ChatView = () => {
                               <span className="text-xs opacity-75">{(msg.fileSize / (1024 * 1024)).toFixed(2)} MB · Open file</span>
                             </span>
                           </a>
+                        ) : msg.type === 'text' && editingMessageId === msg.id ? (
+                          <div className="space-y-2">
+                            <input
+                              autoFocus
+                              value={editingText}
+                              maxLength={4000}
+                              onChange={event => setEditingText(event.target.value)}
+                              onKeyDown={event => {
+                                if (event.key === 'Enter' && !event.shiftKey) {
+                                  event.preventDefault();
+                                  handleSaveEdit(msg.id);
+                                }
+                                if (event.key === 'Escape') {
+                                  setEditingMessageId(null);
+                                  setEditingText('');
+                                }
+                              }}
+                              className="w-full rounded-lg bg-black/10 px-2 py-1 text-current outline-none placeholder:text-current/60"
+                              aria-label="Edit message"
+                            />
+                            <div className="flex justify-end gap-2 text-xs">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingMessageId(null);
+                                  setEditingText('');
+                                }}
+                                className="rounded-md px-2 py-1 opacity-80 hover:opacity-100"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleSaveEdit(msg.id)}
+                                disabled={!editingText.trim()}
+                                className="rounded-md bg-white/20 px-2 py-1 font-semibold disabled:opacity-50"
+                              >
+                                Save
+                              </button>
+                            </div>
+                          </div>
                         ) : (
                           <p>{msg.text}</p>
                         )}
@@ -1358,16 +1645,122 @@ const ChatView = () => {
 
                         <div className="flex items-center justify-end space-x-1.5 mt-1">
                           <span className="text-[10px] opacity-70">{msg.timestamp}</span>
+                          {msg.editedAt && <span className="text-[10px] opacity-70">· edited</span>}
                           {isMe && <CheckCheck size={14} className="opacity-80" />}
                         </div>
                       </div>
 
                       {/* Action icons on hover */}
-                      <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity px-1">
-                        <button onClick={() => addReaction(activeChat.id, msg.id, '❤️')} className="text-xs hover:scale-125 transition-transform">❤️</button>
-                        <button onClick={() => addReaction(activeChat.id, msg.id, '🔥')} className="text-xs hover:scale-125 transition-transform">🔥</button>
+                      <div className="flex flex-wrap items-center gap-2 px-1">
+                        <div className="relative">
+                          <button
+                            type="button"
+                            title="React to message"
+                            aria-label="React to message"
+                            aria-expanded={reactionPickerMessageId === msg.id}
+                            onClick={() => setReactionPickerMessageId(current => current === msg.id ? null : msg.id)}
+                            className="text-sm text-slate-400 transition-colors hover:text-violet-500"
+                          >
+                            <Smile size={16} />
+                          </button>
+                          {reactionPickerMessageId === msg.id && (
+                            <div className="absolute bottom-full left-0 z-20 mb-2 grid grid-cols-4 gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                              {MESSAGE_REACTIONS.map(emoji => (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  onClick={() => handleReaction(msg.id, emoji)}
+                                  aria-label={`React with ${emoji}`}
+                                  className="rounded-lg p-2 text-xl transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          title="Forward message"
+                          aria-label="Forward message"
+                          onClick={() => setForwardingMessage(msg)}
+                          className="text-xs text-slate-400 transition-colors hover:text-violet-500"
+                        >
+                          <Send size={14} />
+                        </button>
                         <button onClick={() => toggleSaveMessage(msg)} className="text-xs text-slate-400 hover:text-amber-400">⭐</button>
+                        {isMe && msg.type === 'text' && editingMessageId !== msg.id && (
+                          <button
+                            type="button"
+                            title="Edit message"
+                            onClick={() => {
+                              setEditingMessageId(msg.id);
+                              setEditingText(msg.text);
+                            }}
+                            className="text-slate-400 hover:text-violet-500"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                        )}
+                        <div className="relative">
+                          <button
+                            type="button"
+                            title="Delete message"
+                            aria-label="Delete message"
+                            aria-expanded={deleteOptionsMessageId === msg.id}
+                            onClick={() => setDeleteOptionsMessageId(current => current === msg.id ? null : msg.id)}
+                            className="text-slate-400 hover:text-rose-500"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                          {deleteOptionsMessageId === msg.id && (
+                            <div className="absolute bottom-full right-0 z-20 mb-2 w-48 rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                              {isMe && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteMessage(msg.id, 'everyone')}
+                                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                                >
+                                  Delete for everyone
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteMessage(msg.id, 'me')}
+                                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
+                              >
+                                Delete for me
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeleteOptionsMessageId(null)}
+                                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
+                      {Object.keys(msg.reactions || {}).length > 0 && (
+                        <div className={`flex flex-wrap gap-1 px-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                          {Object.entries(reactionCounts).map(([emoji, count]) => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              title={`${count} reaction${count === 1 ? '' : 's'}`}
+                              onClick={() => handleReaction(msg.id, emoji)}
+                              className={`rounded-full border px-2 py-0.5 text-xs ${
+                                msg.reactions?.[user.id] === emoji
+                                  ? 'border-violet-300 bg-violet-100 dark:border-violet-700 dark:bg-violet-950'
+                                  : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'
+                              }`}
+                            >
+                              {emoji} {count}
+                            </button>
+                          ))}
+                        </div>
+                      )}
 
                     </div>
                   </div>
@@ -1431,7 +1824,89 @@ const ChatView = () => {
           </div>
         )}
       </div>
+      {forwardingMessage && (
+        <ForwardMessageDialog
+          chats={chats}
+          users={users}
+          userId={user.id}
+          activeChatId={activeChat.id}
+          message={forwardingMessage}
+          isForwarding={isForwarding}
+          onClose={() => setForwardingMessage(null)}
+          onForward={handleForwardMessage}
+        />
+      )}
+    </div>
+  );
+};
 
+const ForwardMessageDialog = ({
+  chats,
+  users,
+  userId,
+  activeChatId,
+  message,
+  isForwarding,
+  onClose,
+  onForward
+}) => {
+  const availableChats = chats.filter(chat => chat.id !== activeChatId);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      role="presentation"
+      onMouseDown={event => {
+        if (event.target === event.currentTarget && !isForwarding) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="forward-message-title"
+        className="max-h-[85vh] w-full max-w-md overflow-hidden rounded-t-3xl bg-white shadow-2xl dark:bg-slate-950 sm:rounded-3xl"
+      >
+        <div className="flex items-center justify-between border-b border-slate-200 p-4 dark:border-slate-800">
+          <div className="min-w-0">
+            <h2 id="forward-message-title" className="font-bold text-slate-900 dark:text-white">Forward message</h2>
+            <p className="mt-1 truncate text-xs text-slate-500">{message.text}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Close"
+            disabled={isForwarding}
+            onClick={onClose}
+            className="rounded-full p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-slate-800"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto p-2">
+          {availableChats.map(chat => {
+            const recipient = users.find(profile =>
+              chat.participants.includes(profile.id) && profile.id !== userId
+            );
+            return (
+              <button
+                key={chat.id}
+                type="button"
+                disabled={isForwarding}
+                onClick={() => onForward(chat.id)}
+                className="flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-colors hover:bg-violet-50 disabled:opacity-50 dark:hover:bg-violet-950/40"
+              >
+                <Avatar src={recipient?.avatar} size="sm" />
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  {recipient?.name || 'Vibely member'}
+                </span>
+                <Send size={16} className="shrink-0 text-violet-500" />
+              </button>
+            );
+          })}
+          {availableChats.length === 0 && (
+            <p className="p-8 text-center text-sm text-slate-500">Start another conversation before forwarding a message.</p>
+          )}
+        </div>
+      </section>
     </div>
   );
 };
@@ -1846,7 +2321,7 @@ const ActiveCallOverlay = () => {
 };
 
 const AuthGate = () => {
-  const { user, authLoading, login, register } = useContext(AuthContext);
+  const { user, authLoading, authError, login, register } = useContext(AuthContext);
   const [isRegistering, setIsRegistering] = useState(false);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -1917,6 +2392,11 @@ const AuthGate = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {authError && (
+            <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+              {authError}
+            </p>
+          )}
           {isRegistering && (
             <label className="block space-y-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">
               Name
