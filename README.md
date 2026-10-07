@@ -28,6 +28,12 @@ Firebase Authentication uses browser-local persistence so a user remains signed 
 
 Chat participants can edit their own text messages, forward text and attachments to another conversation, and add one persistent emoji reaction per user to a message. Sent-message checks turn blue after the other participant opens the conversation and reads the message. The delete menu offers **Delete for everyone** (only on your own messages) and **Delete for me** (hides any message only from your view); **Cancel** closes the menu. The chat menu's **Remove conversation** action hides that conversation only from the current user's chat list and keeps the other participant's history. Publish the updated `firestore.rules` when deploying these features so Firestore enforces the same permissions.
 
+The current route and selected chat are reflected in the URL query string, so refreshing an open conversation restores it after the chat list loads without requiring the hosting platform to rewrite `/chats` paths to the app.
+
+## Group chats
+
+Create groups from **Chats**. The creator becomes the first group admin and can rename the group, add or remove members, promote admins, and share an invite link. Signed-in users can join from **Join group** using the invite link or code; opening a shared `?join=...` link while signed in joins automatically. Admins can regenerate the invite link to invalidate the old one. Members can leave; the last admin must promote another member first. Group chats use the same text, attachment, voice-note, edit/delete, forwarding, reaction, and read-receipt features as direct chats. Publish the updated `firestore.rules` before enabling groups.
+
 ## Vercel deployment
 
 Vercel serves the Vite frontend and the serverless signing endpoint at `/api/cloudinary/signature` from `api/cloudinary/signature.js`. In the Vercel project settings, add these environment variables for the Production environment (and Preview if needed):
