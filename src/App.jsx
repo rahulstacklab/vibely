@@ -598,6 +598,7 @@ const DataProvider = ({ children }) => {
       senderId: user.uid,
       text: cleanText,
       type: 'text',
+      readBy: [user.uid],
       createdAt: serverTimestamp()
     });
     batch.set(chatRef, {
@@ -642,6 +643,7 @@ const DataProvider = ({ children }) => {
       fileName: safeFileName,
       mimeType,
       fileSize: uploadedFile.bytes || file.size,
+      readBy: [user.uid],
       createdAt: serverTimestamp()
     };
     if (duration !== null) messageData.duration = duration;
@@ -738,6 +740,7 @@ const DataProvider = ({ children }) => {
       senderId: user.uid,
       text: message.text || (message.type === 'voice' ? 'Voice note' : 'Attachment'),
       type: message.type,
+      readBy: [user.uid],
       createdAt: serverTimestamp(),
       forwardedFrom: users.find(profile => profile.id === message.senderId)?.name || 'Vibely member'
     };
@@ -1286,6 +1289,40 @@ const ChatView = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeChat?.messages]);
 
+  useEffect(() => {
+    if (!activeChat || !user?.uid) return undefined;
+
+    let isActive = true;
+    const markVisibleMessagesAsRead = async () => {
+      if (!isActive || document.visibilityState !== 'visible') return;
+      const unreadMessages = activeChat.messages.filter(message =>
+        message.senderId !== user.uid && !message.readBy?.includes(user.uid)
+      );
+      for (let index = 0; index < unreadMessages.length; index += 450) {
+        const batch = writeBatch(db);
+        unreadMessages.slice(index, index + 450).forEach(message => {
+          batch.update(doc(db, 'chats', activeChat.id, 'messages', message.id), {
+            readBy: arrayUnion(user.uid)
+          });
+        });
+        try {
+          await batch.commit();
+        } catch (error) {
+          console.error('Unable to mark messages as read.', error);
+          showToast(`Couldn't update read status: ${error.message}`);
+          return;
+        }
+      }
+    };
+
+    markVisibleMessagesAsRead();
+    document.addEventListener('visibilitychange', markVisibleMessagesAsRead);
+    return () => {
+      isActive = false;
+      document.removeEventListener('visibilitychange', markVisibleMessagesAsRead);
+    };
+  }, [activeChat, user?.uid, showToast]);
+
   const handleSend = (e) => {
     e.preventDefault();
     if (!inputText.trim()) return;
@@ -1709,7 +1746,16 @@ const ChatView = () => {
                         <div className="flex items-center justify-end space-x-1.5 mt-1">
                           <span className="text-[10px] opacity-70">{msg.timestamp}</span>
                           {msg.editedAt && <span className="text-[10px] opacity-70">· edited</span>}
-                          {isMe && <CheckCheck size={14} className="opacity-80" />}
+                          {isMe && (
+                            <CheckCheck
+                              size={14}
+                              aria-label={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
+                              title={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
+                              className={msg.readBy?.some(uid => uid !== user.id)
+                                ? 'text-sky-300'
+                                : 'text-white/60'}
+                            />
+                          )}
                         </div>
                       </div>
 
