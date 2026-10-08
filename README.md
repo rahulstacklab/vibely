@@ -32,7 +32,7 @@ The current route and selected chat are reflected in the URL query string, so re
 
 ## Group chats
 
-Create groups from **Chats**. The creator becomes the first group admin and can rename the group, add or remove members, promote admins, and share an invite link. Signed-in users can join from **Join group** using the invite link or code; opening a shared `?join=...` link while signed in joins automatically. Admins can regenerate the invite link to invalidate the old one. Members can leave; the last admin must promote another member first. Group chats use the same text, attachment, voice-note, edit/delete, forwarding, reaction, and read-receipt features as direct chats. Publish the updated `firestore.rules` before enabling groups.
+Use the **Chats** and **Groups** tabs to switch between direct conversations and group conversations. Create groups from **Groups**. The creator becomes the first group admin and can rename the group, add or remove members, promote admins, and share an invite link. Signed-in users can join using an invite link or code; opening a shared `?join=...` link while signed in joins automatically. Admins can regenerate the invite link to invalidate the old one. Members can leave; the last admin must promote another member first. Group chats use the same text, attachment, voice-note, edit/delete, forwarding, reaction, and read-receipt features as direct chats. Publish the updated `firestore.rules` before enabling groups.
 
 ## Vercel deployment
 

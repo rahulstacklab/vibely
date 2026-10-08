@@ -32,7 +32,7 @@ import {
   Home, MessageCircle, Users, User, Settings, Shield, Search, Plus, Copy, UserPlus, Crown,
   Mic, Send, Smile, Paperclip, MoreVertical, Phone, Video, Link2,
   CheckCheck, Sun, Moon, LogOut, Bell, ChevronLeft, Heart,
-  Activity, X, Lock, Coffee, Laptop, Flame,
+  Activity, X, Lock, Flame,
   Sparkles, Filter, Globe, Sliders, Bookmark,
   ShieldAlert, PhoneOff, MicOff, VideoOff, FileText, StopCircle, Pencil, Trash2
 } from 'lucide-react';
@@ -1300,6 +1300,7 @@ const DashboardView = () => {
   const { stories, chats, users } = useContext(DataContext);
   const { navigate } = useContext(RouterContext);
   const { user, setUser } = useContext(AuthContext);
+  const storiesEnabled = isVibeStoriesEnabled();
 
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-900 pb-24 md:pb-8">
@@ -1319,48 +1320,49 @@ const DashboardView = () => {
 
       <div className="max-w-5xl mx-auto p-4 md:p-8 space-y-8">
 
-        {/* Stories Section */}
-        <section className="bg-white dark:bg-slate-950 p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center space-x-2">
-              <Sparkles className="text-violet-500" size={20} />
-              <h2 className="text-base font-bold text-slate-900 dark:text-white">Vibe Stories</h2>
-            </div>
-            <button onClick={() => navigate('/stories')} className="text-xs font-semibold text-violet-600 dark:text-violet-400 hover:underline">
-              View All
-            </button>
-          </div>
-
-          <div className="flex space-x-4 overflow-x-auto pb-2 scrollbar-none">
-            {/* Add Story Card */}
-            <div 
-              onClick={() => navigate('/stories', { create: true })} 
-              className="flex flex-col items-center space-y-2 shrink-0 cursor-pointer group"
-            >
-              <div className="w-16 h-16 rounded-full border-2 border-dashed border-violet-400 dark:border-violet-600 flex items-center justify-center bg-violet-50 dark:bg-violet-950/50 text-violet-600 dark:text-violet-400 group-hover:scale-105 transition-transform">
-                <Plus size={24} />
+        {storiesEnabled && (
+          <section className="bg-white dark:bg-slate-950 p-5 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-2">
+                <Sparkles className="text-violet-500" size={20} />
+                <h2 className="text-base font-bold text-slate-900 dark:text-white">Vibe Stories</h2>
               </div>
-              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Add Story</span>
+              <button onClick={() => navigate('/stories')} className="text-xs font-semibold text-violet-600 dark:text-violet-400 hover:underline">
+                View All
+              </button>
             </div>
 
-            {/* Story List */}
-            {stories.map(story => {
-              const author = MOCK_USERS.find(u => u.id === story.userId) || user;
-              return (
-                <div 
-                  key={story.id} 
-                  onClick={() => navigate('/stories', { storyId: story.id })}
-                  className="flex flex-col items-center space-y-1.5 shrink-0 cursor-pointer"
-                >
-                  <StoryRing src={author.avatar} isViewed={story.isViewed} />
-                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate w-16 text-center">
-                    {author.name.split(' ')[0]}
-                  </span>
+            <div className="flex space-x-4 overflow-x-auto pb-2 scrollbar-none">
+              {/* Add Story Card */}
+              <div 
+                onClick={() => navigate('/stories', { create: true })} 
+                className="flex flex-col items-center space-y-2 shrink-0 cursor-pointer group"
+              >
+                <div className="w-16 h-16 rounded-full border-2 border-dashed border-violet-400 dark:border-violet-600 flex items-center justify-center bg-violet-50 dark:bg-violet-950/50 text-violet-600 dark:text-violet-400 group-hover:scale-105 transition-transform">
+                  <Plus size={24} />
                 </div>
-              );
-            })}
-          </div>
-        </section>
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">Add Story</span>
+              </div>
+
+              {/* Story List */}
+              {stories.map(story => {
+                const author = MOCK_USERS.find(u => u.id === story.userId) || user;
+                return (
+                  <div 
+                    key={story.id} 
+                    onClick={() => navigate('/stories', { storyId: story.id })}
+                    className="flex flex-col items-center space-y-1.5 shrink-0 cursor-pointer"
+                  >
+                    <StoryRing src={author.avatar} isViewed={story.isViewed} />
+                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300 truncate w-16 text-center">
+                      {author.name.split(' ')[0]}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* Quick Vibe Actions */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -2637,9 +2639,19 @@ const ForwardMessageDialog = ({
 };
 
 const StoriesView = () => {
-  const { stories } = useContext(DataContext);
+  const { stories, showToast } = useContext(DataContext);
   const { navigate } = useContext(RouterContext);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const storiesEnabled = isVibeStoriesEnabled();
+
+  useEffect(() => {
+    if (!storiesEnabled) {
+      showToast('Vibe Stories are turned off in Settings.');
+      navigate('/');
+    }
+  }, [storiesEnabled, navigate, showToast]);
+
+  if (!storiesEnabled) return null;
 
   const activeStory = stories[currentIndex] || stories[0];
   const storyAuthor = MOCK_USERS.find(u => u.id === activeStory?.userId) || MOCK_USERS[0];
@@ -2750,7 +2762,7 @@ const DiscoverView = () => {
   const messageUser = async (targetUser) => {
     try {
       const chatId = await createChat(targetUser);
-      navigate('/groups', { chatId });
+      navigate('/chats', { chatId });
     } catch (error) {
       console.error('Unable to start chat.', error);
       showToast(`Couldn't start chat: ${error.message}`);
@@ -2823,32 +2835,239 @@ const SavedMessagesView = () => {
   );
 };
 
+const DEFAULT_SETTINGS = {
+  privacy: {
+    privateProfile: true,
+    showOnlineStatus: true,
+    publicVibeBadges: true,
+    discoverableByVibe: true,
+    vibeStories: true
+  },
+  notifications: {
+    pushAlerts: true,
+    messagePreviews: true,
+    storyUpdates: true,
+    soundEffects: false
+  },
+  security: {
+    twoFactor: true,
+    loginAlerts: true,
+    activeSessions: false,
+    biometricUnlock: false
+  },
+  storage: {
+    autoDownloadMedia: true,
+    wifiOnlyDownloads: true,
+    dataSaverMode: false
+  }
+};
+
+const getSavedSettings = () => {
+  if (typeof window === 'undefined') return DEFAULT_SETTINGS;
+
+  try {
+    const stored = JSON.parse(window.localStorage.getItem('vibely_settings') || '{}');
+    return {
+      privacy: { ...DEFAULT_SETTINGS.privacy, ...(stored.privacy || {}) },
+      notifications: { ...DEFAULT_SETTINGS.notifications, ...(stored.notifications || {}) },
+      security: { ...DEFAULT_SETTINGS.security, ...(stored.security || {}) },
+      storage: { ...DEFAULT_SETTINGS.storage, ...(stored.storage || {}) }
+    };
+  } catch (error) {
+    console.error('Unable to load saved settings.', error);
+    return DEFAULT_SETTINGS;
+  }
+};
+
+const isVibeStoriesEnabled = () => {
+  if (typeof window === 'undefined') return true;
+
+  try {
+    const stored = JSON.parse(window.localStorage.getItem('vibely_settings') || '{}');
+    return stored?.privacy?.vibeStories !== false;
+  } catch (error) {
+    console.error('Unable to read Vibe Stories preference.', error);
+    return true;
+  }
+};
+
 const SettingsView = () => {
+  const { showToast } = useContext(DataContext);
+  const [expandedSection, setExpandedSection] = useState('privacy');
+  const [settings, setSettings] = useState(() => getSavedSettings());
+
+  useEffect(() => {
+    window.localStorage.setItem('vibely_settings', JSON.stringify(settings));
+  }, [settings]);
+
+  const toggleSetting = (sectionId, key) => {
+    setSettings((previous) => ({
+      ...previous,
+      [sectionId]: {
+        ...previous[sectionId],
+        [key]: !previous[sectionId][key]
+      }
+    }));
+  };
+
+  const resetSettings = () => {
+    setSettings(DEFAULT_SETTINGS);
+    showToast('Settings restored to defaults.');
+  };
+
+  const clearStorage = () => {
+    window.localStorage.removeItem('vibely_settings');
+    setSettings(DEFAULT_SETTINGS);
+    showToast('Cache cleared.');
+  };
+
+  const sections = [
+    {
+      id: 'privacy',
+      title: 'Account Privacy',
+      desc: 'Control who sees your vibe and online status',
+      icon: Shield,
+      options: [
+        { key: 'privateProfile', label: 'Private profile', hint: 'Limit new people from seeing your activity.' },
+        { key: 'showOnlineStatus', label: 'Show online status', hint: 'Let contacts see when you are active.' },
+        { key: 'publicVibeBadges', label: 'Public vibe badges', hint: 'Display your current mood on your profile.' },
+        { key: 'discoverableByVibe', label: 'Discoverable by vibe', hint: 'Appear in vibe-based recommendations.' },
+        { key: 'vibeStories', label: 'Vibe Stories', hint: 'Show your stories and story updates on your feed.' }
+      ]
+    },
+    {
+      id: 'notifications',
+      title: 'Notifications',
+      desc: 'Message alerts and story updates',
+      icon: Bell,
+      options: [
+        { key: 'pushAlerts', label: 'Push alerts', hint: 'Receive mobile and desktop notifications.' },
+        { key: 'messagePreviews', label: 'Message previews', hint: 'Show conversation text in notifications.' },
+        { key: 'storyUpdates', label: 'Story updates', hint: 'Notify me when close friends post stories.' },
+        { key: 'soundEffects', label: 'Sound effects', hint: 'Play audio cues for new messages and reactions.' }
+      ]
+    },
+    {
+      id: 'security',
+      title: 'Security & Password',
+      desc: 'Two-factor auth and active sessions',
+      icon: Lock,
+      options: [
+        { key: 'twoFactor', label: 'Two-factor auth', hint: 'Require an extra verification step for sign-in.' },
+        { key: 'loginAlerts', label: 'Login alerts', hint: 'Get notified whenever a new device signs in.' },
+        { key: 'activeSessions', label: 'Active sessions', hint: 'Review sessions currently signed into your account.' },
+        { key: 'biometricUnlock', label: 'Biometric unlock', hint: 'Use Face ID or fingerprint on supported devices.' }
+      ],
+      actions: [
+        { label: 'Change password', variant: 'secondary' },
+        { label: 'Review devices', variant: 'secondary' }
+      ]
+    },
+    {
+      id: 'storage',
+      title: 'Storage & Data',
+      desc: 'Network usage and media auto-download',
+      icon: Sliders,
+      options: [
+        { key: 'autoDownloadMedia', label: 'Auto-download media', hint: 'Download pictures and videos automatically.' },
+        { key: 'wifiOnlyDownloads', label: 'Download on Wi‑Fi only', hint: 'Avoid mobile data usage when syncing media.' },
+        { key: 'dataSaverMode', label: 'Data saver mode', hint: 'Reduce media quality to save bandwidth.' }
+      ],
+      actions: [
+        { label: 'Clear cache', variant: 'danger' },
+        { label: 'Reset preferences', variant: 'secondary' }
+      ]
+    }
+  ];
+
   return (
     <div className="flex-1 p-4 md:p-8 bg-slate-50 dark:bg-slate-900 overflow-y-auto pb-24 md:pb-8">
       <div className="max-w-3xl mx-auto space-y-6">
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Settings</h1>
 
-        <div className="bg-white dark:bg-slate-950 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 divide-y divide-slate-100 dark:divide-slate-800">
-          {[
-            { title: 'Account Privacy', desc: 'Control who sees your vibe and online status', icon: Shield },
-            { title: 'Notifications', desc: 'Message alerts and story updates', icon: Bell },
-            { title: 'Security & Password', desc: 'Two-factor auth and active sessions', icon: Lock },
-            { title: 'Storage & Data', desc: 'Network usage and media auto-download', icon: Sliders }
-          ].map((s, idx) => {
-            const Icon = s.icon;
+        <div className="bg-white dark:bg-slate-950 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 overflow-hidden">
+          {sections.map((section) => {
+            const Icon = section.icon;
+            const isExpanded = expandedSection === section.id;
+
             return (
-              <div key={idx} className="p-4 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-900/50 cursor-pointer">
-                <div className="flex items-center space-x-3">
-                  <div className="p-2.5 rounded-2xl bg-violet-50 dark:bg-violet-950 text-violet-600 dark:text-violet-400">
-                    <Icon size={20} />
+              <div key={section.id} className="border-b border-slate-100 dark:border-slate-800 last:border-b-0">
+                <button
+                  type="button"
+                  onClick={() => setExpandedSection(isExpanded ? '' : section.id)}
+                  className="w-full p-4 flex items-center justify-between text-left hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors"
+                >
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className="p-2.5 rounded-2xl bg-violet-50 dark:bg-violet-950 text-violet-600 dark:text-violet-400">
+                      <Icon size={20} />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">{section.title}</h3>
+                      <p className="text-xs text-slate-400">{section.desc}</p>
+                    </div>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">{s.title}</h3>
-                    <p className="text-xs text-slate-400">{s.desc}</p>
+                  <ChevronLeft
+                    size={18}
+                    className={`shrink-0 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                  />
+                </button>
+
+                {isExpanded && (
+                  <div className="border-t border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 px-4 py-4 space-y-4">
+                    {section.options.map((option) => (
+                      <div key={option.key} className="flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">{option.label}</p>
+                          <p className="text-xs text-slate-400">{option.hint}</p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={settings[section.id][option.key]}
+                          onClick={() => toggleSetting(section.id, option.key)}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full border transition-colors ${settings[section.id][option.key] ? 'bg-violet-500 border-violet-500' : 'bg-slate-200 border-slate-300 dark:bg-slate-700 dark:border-slate-600'}`}
+                        >
+                          <span
+                            className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${settings[section.id][option.key] ? 'translate-x-5' : 'translate-x-1'}`}
+                          />
+                        </button>
+                      </div>
+                    ))}
+
+                    {section.actions && (
+                      <div className="flex flex-wrap gap-2 pt-2">
+                        {section.actions.map((action) => {
+                          const isDanger = action.variant === 'danger';
+                          const isSecondary = action.variant === 'secondary';
+                          const onAction = () => {
+                            if (action.label === 'Reset preferences') return resetSettings();
+                            if (action.label === 'Clear cache') return clearStorage();
+                            if (action.label === 'Change password') return showToast('Password change flow is ready for implementation.');
+                            if (action.label === 'Review devices') return showToast('Session review is available in your security dashboard.');
+                            return undefined;
+                          };
+
+                          return (
+                            <button
+                              key={action.label}
+                              type="button"
+                              onClick={onAction}
+                              className={`rounded-xl px-3 py-2 text-xs font-semibold transition-colors ${
+                                isDanger
+                                  ? 'bg-rose-100 text-rose-600 hover:bg-rose-200 dark:bg-rose-950 dark:text-rose-300 dark:hover:bg-rose-900'
+                                  : isSecondary
+                                    ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                                    : 'bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900 dark:text-violet-200 dark:hover:bg-violet-800'
+                              }`}
+                            >
+                              {action.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                </div>
-                <ChevronLeft size={18} className="rotate-180 text-slate-400" />
+                )}
               </div>
             );
           })}
@@ -3119,7 +3338,7 @@ const MainAppLayout = () => {
   const renderCurrentView = () => {
     if (currentRoute === '/') return <DashboardView />;
     if (currentRoute === '/chats' || currentRoute === '/groups') return <ChatView />;
-    if (currentRoute === '/stories') return <StoriesView />;
+    if (currentRoute === '/stories') return isVibeStoriesEnabled() ? <StoriesView /> : <DashboardView />;
     if (currentRoute === '/moments') return <MomentsView />;
     if (currentRoute === '/discover') return <DiscoverView />;
     if (currentRoute === '/saved') return <SavedMessagesView />;
