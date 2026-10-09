@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import { useState, useEffect, useContext, createContext, useRef, useCallback } from 'react';
+import { useState, useEffect, useContext, createContext, useRef, useCallback, useMemo } from 'react';
 import {
   browserLocalPersistence,
   createUserWithEmailAndPassword,
@@ -20,6 +20,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -212,7 +213,6 @@ const ThemeContext = createContext();
 const AuthContext = createContext();
 const RouterContext = createContext();
 const DataContext = createContext();
-const STORY_STORAGE_KEY = 'vibely_stories_v1';
 let localAuthPersistencePromise;
 const MESSAGE_REACTIONS = ['❤️', '😂', '😮', '😢', '🙏', '👍', '🔥', '🎉'];
 const ATTACHMENT_MIME_TYPES = {
@@ -454,8 +454,19 @@ const DataProvider = ({ children }) => {
   const { navigate } = useContext(RouterContext);
   const [chatState, setChatState] = useState({ uid: null, chats: [] });
   const [userState, setUserState] = useState({ uid: null, users: [] });
+  const [friendState, setFriendState] = useState({ uid: null, ids: [] });
+  const [requestState, setRequestState] = useState({ uid: null, requests: [] });
+  const [storyState, setStoryState] = useState({ uid: null, stories: [] });
   const chats = chatState.uid === user?.uid ? chatState.chats : [];
   const users = userState.uid === user?.uid ? userState.users : [];
+  const friendIds = useMemo(
+    () => friendState.uid === user?.uid ? friendState.ids : [],
+    [friendState, user?.uid]
+  );
+  const friendRequests = requestState.uid === user?.uid ? requestState.requests : [];
+  const stories = user?.uid && storyState.uid === user.uid
+    ? storyState.stories.filter(story => story.userId === user.uid || friendIds.includes(story.userId))
+    : [];
   const setChats = useCallback((update) => setChatState(current => ({
     uid: user?.uid || null,
     chats: typeof update === 'function'
@@ -468,25 +479,6 @@ const DataProvider = ({ children }) => {
       ? update(current.uid === user?.uid ? current.users : [])
       : update
   })), [user?.uid]);
-  const [stories, setStories] = useState(() => {
-    if (typeof window === 'undefined') return [];
-
-    try {
-      const savedStories = JSON.parse(window.localStorage.getItem(STORY_STORAGE_KEY) || '[]');
-      if (!Array.isArray(savedStories)) return [];
-      const expirationCutoff = Date.now() - 24 * 60 * 60 * 1000;
-      return savedStories.filter(story =>
-        story &&
-        typeof story.id === 'string' &&
-        typeof story.image === 'string' &&
-        (!Number.isFinite(story.createdAt) || story.createdAt > expirationCutoff)
-      );
-    } catch (error) {
-      console.error('Unable to load saved stories.', error);
-      return [];
-    }
-  });
-  const storiesRef = useRef(stories);
   const [moments, setMoments] = useState(MOCK_MOMENTS);
   const [savedMessages, setSavedMessages] = useState([]);
   const [activeCall, setActiveCall] = useState(null); // { user, type: 'voice' | 'video' }
@@ -497,54 +489,86 @@ const DataProvider = ({ children }) => {
     setTimeout(() => setToastMessage(null), 3500);
   }, []);
 
-  const updateStories = useCallback((update) => {
-    const nextStories = typeof update === 'function' ? update(storiesRef.current) : update;
+  const addStory = useCallback(async (story) => {
+    if (!user?.uid) throw new Error('Sign in to post a story.');
+    const storyRef = doc(db, 'stories', story.id || doc(collection(db, 'stories')).id);
+    await setDoc(storyRef, {
+      userId: user.uid,
+      image: story.image || '',
+      caption: story.caption || '',
+      vibe: story.vibe || '',
+      createdAt: serverTimestamp(),
+      likedBy: [],
+      viewedBy: []
+    });
+    return storyRef.id;
+  }, [user]);
 
+  const toggleStoryLike = useCallback(async (story) => {
+    if (!user?.uid || !story?.id) return;
+    const storyRef = doc(db, 'stories', story.id);
+    await runTransaction(db, async transaction => {
+      const snapshot = await transaction.get(storyRef);
+      if (!snapshot.exists()) throw new Error('This story is no longer available.');
+      const likedBy = snapshot.data().likedBy || [];
+      transaction.update(storyRef, {
+        likedBy: likedBy.includes(user.uid) ? arrayRemove(user.uid) : arrayUnion(user.uid)
+      });
+    });
+  }, [user]);
+
+  const markStoryViewed = useCallback(async (storyId) => {
+    if (!user?.uid || !storyId) return;
     try {
-      window.localStorage.setItem(STORY_STORAGE_KEY, JSON.stringify(nextStories));
+      await updateDoc(doc(db, 'stories', storyId), { viewedBy: arrayUnion(user.uid) });
     } catch (error) {
-      console.error('Unable to save stories to browser storage.', error);
-      showToast('Could not save this story. Browser storage may be full.');
-      return false;
+      console.error('Unable to mark story as viewed.', error);
+      showToast(`Couldn't mark story viewed: ${error.message}`);
+    }
+  }, [showToast, user]);
+
+  const sendFriendRequest = useCallback(async (targetUserId) => {
+    if (!user?.uid || !targetUserId || targetUserId === user.uid) return;
+    const requestId = `${user.uid}__${targetUserId}`;
+    await setDoc(doc(db, 'friendRequests', requestId), {
+      senderId: user.uid,
+      recipientId: targetUserId,
+      status: 'pending',
+      createdAt: serverTimestamp()
+    });
+  }, [user]);
+
+  const respondToFriendRequest = useCallback(async (request, accept) => {
+    if (!user?.uid || request?.recipientId !== user.uid || request.status !== 'pending') return;
+
+    const requestRef = doc(db, 'friendRequests', request.id);
+    if (!accept) {
+      await updateDoc(requestRef, { status: 'rejected' });
+      return;
     }
 
-    storiesRef.current = nextStories;
-    setStories(nextStories);
-    return true;
-  }, [showToast]);
+    const members = [request.senderId, request.recipientId].sort();
+    const friendshipId = members.join('__');
+    const batch = writeBatch(db);
+    batch.update(requestRef, { status: 'accepted' });
+    batch.set(doc(db, 'friendships', friendshipId), {
+      members,
+      requestId: request.id,
+      createdAt: serverTimestamp()
+    });
+    await batch.commit();
+  }, [user]);
 
-  const addStory = useCallback((story) => {
-    const nextStory = {
-      ...story,
-      id: story.id || `story-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      timestamp: story.timestamp || 'Just now',
-      createdAt: story.createdAt || Date.now(),
-      likes: Number.isFinite(story.likes) ? story.likes : 0,
-      liked: Boolean(story.liked),
-      isViewed: Boolean(story.isViewed),
-      userId: story.userId || user?.uid || 'u1'
-    };
+  const cancelFriendRequest = useCallback(async (requestId) => {
+    if (!user?.uid) return;
+    await deleteDoc(doc(db, 'friendRequests', requestId));
+  }, [user]);
 
-    return updateStories(current => [nextStory, ...current]) ? nextStory.id : null;
-  }, [updateStories, user?.uid]);
-
-  const toggleStoryLike = useCallback((storyId) => {
-    return updateStories(current => current.map(story => {
-      if (story.id !== storyId) return story;
-      const nextLiked = !story.liked;
-      return {
-        ...story,
-        liked: nextLiked,
-        likes: Math.max(0, (story.likes || 0) + (nextLiked ? 1 : -1))
-      };
-    }));
-  }, [updateStories]);
-
-  const markStoryViewed = useCallback((storyId) => {
-    return updateStories(current => current.map(story =>
-      story.id === storyId ? { ...story, isViewed: true } : story
-    ));
-  }, [updateStories]);
+  const removeFriend = useCallback(async (friendId) => {
+    if (!user?.uid || !friendId) return;
+    const friendshipId = [user.uid, friendId].sort().join('__');
+    await deleteDoc(doc(db, 'friendships', friendshipId));
+  }, [user]);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -633,6 +657,108 @@ const DataProvider = ({ children }) => {
       messageSubscriptions.forEach(unsubscribe => unsubscribe());
     };
   }, [user?.uid, setChats, setUsers, showToast]);
+
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+
+    const unsubscribers = [];
+    const updateRequests = (snapshot, direction) => {
+      setRequestState(current => {
+        const existing = current.uid === user.uid ? current.requests : [];
+        const nextById = new Map(existing.map(request => [request.id, request]));
+        snapshot.docChanges().forEach(change => {
+          if (change.type === 'removed') nextById.delete(change.doc.id);
+          else nextById.set(change.doc.id, { id: change.doc.id, ...change.doc.data(), direction });
+        });
+        return { uid: user.uid, requests: [...nextById.values()] };
+      });
+    };
+
+    unsubscribers.push(onSnapshot(
+      query(collection(db, 'friendRequests'), where('recipientId', '==', user.uid)),
+      snapshot => updateRequests(snapshot, 'incoming'),
+      error => {
+        console.error('Unable to load incoming friend requests.', error);
+        showToast(`Couldn't load friend requests: ${error.message}`);
+      }
+    ));
+    unsubscribers.push(onSnapshot(
+      query(collection(db, 'friendRequests'), where('senderId', '==', user.uid)),
+      snapshot => updateRequests(snapshot, 'outgoing'),
+      error => {
+        console.error('Unable to load sent friend requests.', error);
+        showToast(`Couldn't load sent requests: ${error.message}`);
+      }
+    ));
+
+    return () => unsubscribers.forEach(unsubscribe => unsubscribe());
+  }, [user?.uid, showToast]);
+
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+
+    return onSnapshot(
+      query(collection(db, 'friendships'), where('members', 'array-contains', user.uid)),
+      snapshot => {
+        const ids = snapshot.docs
+          .flatMap(friendship => friendship.data().members || [])
+          .filter(memberId => memberId !== user.uid);
+        setFriendState({ uid: user.uid, ids: [...new Set(ids)] });
+      },
+      error => {
+        console.error('Unable to load friends.', error);
+        showToast(`Couldn't load friends: ${error.message}`);
+      }
+    );
+  }, [user?.uid, showToast]);
+
+  useEffect(() => {
+    if (!user?.uid) return undefined;
+
+    const ownerIds = [...new Set([user.uid, ...friendIds])];
+    const unsubscribeStories = ownerIds.reduce((unsubscribers, _, index) => {
+      if (index % 30 !== 0) return unsubscribers;
+      const ownerIdChunk = ownerIds.slice(index, index + 30);
+      unsubscribers.push(onSnapshot(
+        query(collection(db, 'stories'), where('userId', 'in', ownerIdChunk)),
+        snapshot => {
+          const storiesInChunk = snapshot.docs.map(storyDoc => {
+            const story = storyDoc.data();
+            const createdAt = story.createdAt?.toMillis?.() || Date.now();
+            return {
+              id: storyDoc.id,
+              ...story,
+              createdAt,
+              timestamp: createdAt ? new Date(createdAt).toLocaleString() : 'Just now',
+              likedBy: story.likedBy || [],
+              viewedBy: story.viewedBy || [],
+              liked: (story.likedBy || []).includes(user.uid),
+              isViewed: (story.viewedBy || []).includes(user.uid),
+              likes: (story.likedBy || []).length
+            };
+          }).filter(story => story.createdAt > Date.now() - 24 * 60 * 60 * 1000);
+          setStoryState(current => {
+            const previousStories = current.uid === user.uid ? current.stories : [];
+            const storiesOutsideChunk = previousStories.filter(story =>
+              ownerIds.includes(story.userId) && !ownerIdChunk.includes(story.userId)
+            );
+            return {
+              uid: user.uid,
+              stories: [...storiesOutsideChunk, ...storiesInChunk]
+                .sort((first, second) => second.createdAt - first.createdAt)
+            };
+          });
+        },
+        error => {
+          console.error('Unable to load friend stories.', error);
+          showToast(`Couldn't load friend stories: ${error.message}`);
+        }
+      ));
+      return unsubscribers;
+    }, []);
+
+    return () => unsubscribeStories.forEach(unsubscribe => unsubscribe());
+  }, [user?.uid, friendIds, showToast]);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -1077,13 +1203,14 @@ const DataProvider = ({ children }) => {
 
   return (
     <DataContext.Provider value={{
-      chats, users, stories, moments, savedMessages, activeCall, toastMessage,
+      chats, users, stories, friendIds, friendRequests, moments, savedMessages, activeCall, toastMessage,
       createChat, createGroup, joinGroup, addGroupMembers, removeGroupMember,
       promoteGroupAdmin, renameGroup, rotateGroupInvite, leaveGroup,
       sendMessage, sendAttachment, editMessage, deleteMessage, hideConversation,
       hideMessageForMe,
       addReaction, forwardMessage, toggleSaveMessage, votePoll,
       addStory, toggleStoryLike, markStoryViewed,
+      sendFriendRequest, respondToFriendRequest, cancelFriendRequest, removeFriend,
       setActiveCall, showToast
     }}>
       {children}
@@ -1395,7 +1522,11 @@ const DashboardView = () => {
                 </div>
               ) : (
                 visibleStories.map(story => {
-                  const author = MOCK_USERS.find(u => u.id === story.userId) || (user && { ...user, name: user.name || 'You', avatar: user.avatar }) || { name: 'You', avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=250&q=80' };
+                  const author = story.userId === user?.uid
+                    ? { ...user, name: user.name || 'You' }
+                    : users.find(profile => profile.id === story.userId)
+                      || MOCK_USERS.find(profile => profile.id === story.userId)
+                      || { name: 'Vibely friend', avatar: '' };
                   return (
                     <div 
                       key={story.id} 
@@ -2689,13 +2820,10 @@ const ForwardMessageDialog = ({
 };
 
 const StoriesView = () => {
-  const { stories, showToast, addStory, toggleStoryLike, markStoryViewed } = useContext(DataContext);
+  const { stories, users, showToast, addStory, toggleStoryLike, markStoryViewed } = useContext(DataContext);
   const { navigate, routeParams } = useContext(RouterContext);
   const { user } = useContext(AuthContext);
-  const [currentIndex, setCurrentIndex] = useState(() => {
-    const storyIndex = stories.findIndex(story => story.id === routeParams.storyId);
-    return storyIndex >= 0 ? storyIndex : 0;
-  });
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const [isPosting, setIsPosting] = useState(false);
   const [draft, setDraft] = useState({
     image: '',
@@ -2704,10 +2832,16 @@ const StoriesView = () => {
   });
   const storiesEnabled = isVibeStoriesEnabled();
   const isComposerOpen = Boolean(routeParams.create);
+  const requestedIndex = stories.findIndex(story => story.id === routeParams.storyId);
+  const currentIndex = requestedIndex >= 0 ? requestedIndex : Math.min(selectedIndex, Math.max(0, stories.length - 1));
 
   const activeStory = stories[currentIndex] || stories[0] || null;
   const storyAuthor = activeStory
-    ? (MOCK_USERS.find(u => u.id === activeStory.userId) || (user ? { ...user, name: user.name || 'You' } : MOCK_USERS[0]))
+    ? (activeStory.userId === user?.uid
+      ? { ...user, name: user.name || 'You' }
+      : users.find(profile => profile.id === activeStory.userId)
+        || MOCK_USERS.find(profile => profile.id === activeStory.userId)
+        || { name: 'Vibely friend', avatar: '' })
     : null;
 
   useEffect(() => {
@@ -2743,19 +2877,43 @@ const StoriesView = () => {
     reader.onload = () => {
       const source = new Image();
       source.onload = () => {
-        const maxWidth = 1080;
-        const maxHeight = 1920;
+        const maxWidth = 720;
+        const maxHeight = 1280;
         const scale = Math.min(1, maxWidth / source.width, maxHeight / source.height);
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(source.width * scale);
-        canvas.height = Math.round(source.height * scale);
-        const context = canvas.getContext('2d');
-        if (!context) {
-          showToast('Could not prepare this image. Try another photo.');
-          return;
-        }
-        context.drawImage(source, 0, 0, canvas.width, canvas.height);
-        setDraft(prev => ({ ...prev, image: canvas.toDataURL('image/jpeg', 0.78) }));
+        const encodeStoryImage = (width, height, qualityIndex = 0) => {
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(width));
+          canvas.height = Math.max(1, Math.round(height));
+          const context = canvas.getContext('2d');
+          if (!context) {
+            showToast('Could not prepare this image. Try another photo.');
+            return;
+          }
+          context.drawImage(source, 0, 0, canvas.width, canvas.height);
+          const qualities = [0.72, 0.58, 0.45];
+          canvas.toBlob(blob => {
+            if (!blob) {
+              showToast('Could not prepare this image. Try another photo.');
+              return;
+            }
+            if (blob.size > 480 * 1024) {
+              if (qualityIndex < qualities.length - 1) {
+                encodeStoryImage(width, height, qualityIndex + 1);
+              } else if (Math.max(width, height) > 320) {
+                encodeStoryImage(width * 0.8, height * 0.8);
+              } else {
+                showToast('This image is too large to store safely. Choose a smaller photo.');
+              }
+              return;
+            }
+
+            const imageReader = new FileReader();
+            imageReader.onload = () => setDraft(prev => ({ ...prev, image: imageReader.result }));
+            imageReader.onerror = () => showToast('Could not prepare this image. Try another photo.');
+            imageReader.readAsDataURL(blob);
+          }, 'image/jpeg', qualities[qualityIndex]);
+        };
+        encodeStoryImage(source.width * scale, source.height * scale);
       };
       source.onerror = () => showToast('Could not read this image. Try another photo.');
       source.src = reader.result;
@@ -2765,38 +2923,41 @@ const StoriesView = () => {
     event.target.value = '';
   };
 
-  const createStory = () => {
+  const createStory = async () => {
     if (isPosting) return;
     setIsPosting(true);
     const normalizedCaption = draft.caption.trim() || (draft.image ? 'Fresh from my day ✨' : 'Just sharing a moment');
     const normalizedVibe = draft.vibe.trim() || '✨ Fresh update';
     const author = user || MOCK_USERS[0];
-    const createdId = addStory({
-      id: `story-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      userId: author.id || author.uid || 'u1',
-      image: draft.image,
-      caption: normalizedCaption,
-      timestamp: 'Just now',
-      vibe: normalizedVibe,
-      isViewed: false,
-      liked: false,
-      likes: 0
-    });
-
-    setIsPosting(false);
-    if (!createdId) return;
-    setDraft({ image: '', caption: '', vibe: '✨ Fresh update' });
-    navigate('/stories', { storyId: createdId });
+    try {
+      const createdId = await addStory({
+        userId: author.id || author.uid,
+        image: draft.image,
+        caption: normalizedCaption,
+        vibe: normalizedVibe
+      });
+      setDraft({ image: '', caption: '', vibe: '✨ Fresh update' });
+      navigate('/stories', { storyId: createdId });
+    } catch (error) {
+      console.error('Unable to post story.', error);
+      showToast(`Couldn't post story: ${error.message}`);
+    } finally {
+      setIsPosting(false);
+    }
   };
 
   const handleNextStory = () => {
     if (!stories.length) return;
-    setCurrentIndex(prev => Math.min(stories.length - 1, prev + 1));
+    const nextIndex = Math.min(stories.length - 1, currentIndex + 1);
+    setSelectedIndex(nextIndex);
+    navigate('/stories', { storyId: stories[nextIndex].id });
   };
 
   const handlePrevStory = () => {
     if (!stories.length) return;
-    setCurrentIndex(prev => Math.max(0, prev - 1));
+    const previousIndex = Math.max(0, currentIndex - 1);
+    setSelectedIndex(previousIndex);
+    navigate('/stories', { storyId: stories[previousIndex].id });
   };
 
   if (!stories.length && !isComposerOpen) {
@@ -2932,7 +3093,10 @@ const StoriesView = () => {
                 className="flex-1 rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-xs text-white placeholder:text-white/70 focus:border-violet-300 focus:outline-none backdrop-blur-sm"
               />
               <button
-                onClick={() => toggleStoryLike(activeStory.id)}
+                onClick={() => toggleStoryLike(activeStory).catch(error => {
+                  console.error('Unable to update story like.', error);
+                  showToast(`Couldn't update like: ${error.message}`);
+                })}
                 className={`flex h-12 w-12 items-center justify-center rounded-2xl border transition-colors ${activeStory.liked ? 'border-pink-400 bg-pink-500/20 text-pink-300' : 'border-white/15 bg-white/10 text-white'}`}
                 aria-label="Like story"
               >
@@ -3002,7 +3166,10 @@ const MomentsView = () => {
 };
 
 const DiscoverView = () => {
-  const { users, createChat, showToast } = useContext(DataContext);
+  const {
+    users, friendIds, friendRequests, createChat, sendFriendRequest,
+    respondToFriendRequest, cancelFriendRequest, removeFriend, showToast
+  } = useContext(DataContext);
   const { navigate } = useContext(RouterContext);
 
   const messageUser = async (targetUser) => {
@@ -3012,6 +3179,28 @@ const DiscoverView = () => {
     } catch (error) {
       console.error('Unable to start chat.', error);
       showToast(`Couldn't start chat: ${error.message}`);
+    }
+  };
+
+  const friendAction = async (action, targetUser) => {
+    try {
+      if (action === 'add') await sendFriendRequest(targetUser.id);
+      if (action === 'accept' || action === 'reject') {
+        const request = friendRequests.find(item =>
+          item.direction === 'incoming' && item.senderId === targetUser.id && item.status === 'pending'
+        );
+        if (request) await respondToFriendRequest(request, action === 'accept');
+      }
+      if (action === 'cancel') {
+        const request = friendRequests.find(item =>
+          item.direction === 'outgoing' && item.recipientId === targetUser.id && item.status === 'pending'
+        );
+        if (request) await cancelFriendRequest(request.id);
+      }
+      if (action === 'remove') await removeFriend(targetUser.id);
+    } catch (error) {
+      console.error(`Unable to ${action} friend.`, error);
+      showToast(`Couldn't ${action} friend: ${error.message}`);
     }
   };
 
@@ -3034,12 +3223,35 @@ const DiscoverView = () => {
                   <p className="text-[11px] text-slate-400 mt-1">{u.bio || 'Ready to meet new people.'}</p>
                 </div>
               </div>
-              <button 
-                onClick={() => messageUser(u)}
-                className="bg-slate-900 dark:bg-slate-800 text-white px-3 py-2 rounded-2xl text-xs font-semibold hover:bg-violet-600 transition-colors"
-              >
-                Message
-              </button>
+              <div className="flex shrink-0 flex-col gap-2">
+                {friendIds.includes(u.id) ? (
+                  <button
+                    onClick={() => friendAction('remove', u)}
+                    className="rounded-2xl bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 transition-colors hover:bg-rose-50 hover:text-rose-600 dark:bg-emerald-950/50 dark:text-emerald-300"
+                  >
+                    Friends · Remove
+                  </button>
+                ) : friendRequests.some(request =>
+                  request.direction === 'incoming' && request.senderId === u.id && request.status === 'pending'
+                ) ? (
+                  <div className="flex gap-1">
+                    <button onClick={() => friendAction('accept', u)} className="rounded-xl bg-violet-600 px-2.5 py-2 text-xs font-semibold text-white">Accept</button>
+                    <button onClick={() => friendAction('reject', u)} className="rounded-xl bg-slate-100 px-2.5 py-2 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">Decline</button>
+                  </div>
+                ) : friendRequests.some(request =>
+                  request.direction === 'outgoing' && request.recipientId === u.id && request.status === 'pending'
+                ) ? (
+                  <button onClick={() => friendAction('cancel', u)} className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">Request sent</button>
+                ) : (
+                  <button onClick={() => friendAction('add', u)} className="rounded-2xl bg-violet-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-violet-700">Add friend</button>
+                )}
+                <button
+                  onClick={() => messageUser(u)}
+                  className="rounded-2xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-violet-600 dark:bg-slate-800"
+                >
+                  Message
+                </button>
+              </div>
             </div>
           ))}
         </div>
