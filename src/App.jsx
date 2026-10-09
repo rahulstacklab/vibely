@@ -212,6 +212,7 @@ const ThemeContext = createContext();
 const AuthContext = createContext();
 const RouterContext = createContext();
 const DataContext = createContext();
+const STORY_STORAGE_KEY = 'vibely_stories_v1';
 let localAuthPersistencePromise;
 const MESSAGE_REACTIONS = ['❤️', '😂', '😮', '😢', '🙏', '👍', '🔥', '🎉'];
 const ATTACHMENT_MIME_TYPES = {
@@ -396,8 +397,15 @@ const RouterProvider = ({ children }) => {
   };
   const [currentRoute, setCurrentRoute] = useState(getRouteFromUrl);
   const [routeParams, setRouteParams] = useState(() => {
-    const chatId = new URLSearchParams(window.location.search).get('chat');
-    return chatId ? { chatId } : {};
+    const searchParams = new URLSearchParams(window.location.search);
+    const params = {};
+    const chatId = searchParams.get('chat');
+    const storyId = searchParams.get('story');
+    const create = searchParams.get('create');
+    if (chatId) params.chatId = chatId;
+    if (storyId) params.storyId = storyId;
+    if (create === '1' || create === 'true') params.create = true;
+    return params;
   });
 
   const navigate = (path, params = {}) => {
@@ -405,8 +413,12 @@ const RouterProvider = ({ children }) => {
     url.pathname = '/';
     url.searchParams.delete('route');
     url.searchParams.delete('chat');
+    url.searchParams.delete('story');
+    url.searchParams.delete('create');
     if (path !== '/') url.searchParams.set('route', path);
     if (params.chatId) url.searchParams.set('chat', params.chatId);
+    if (params.storyId) url.searchParams.set('story', params.storyId);
+    if (params.create) url.searchParams.set('create', 'true');
     window.history.pushState({}, '', `${url.pathname}${url.search}${url.hash}`);
     setCurrentRoute(path);
     setRouteParams(params);
@@ -416,8 +428,15 @@ const RouterProvider = ({ children }) => {
   useEffect(() => {
     const restoreRoute = () => {
       setCurrentRoute(getRouteFromUrl());
-      const chatId = new URLSearchParams(window.location.search).get('chat');
-      setRouteParams(chatId ? { chatId } : {});
+      const searchParams = new URLSearchParams(window.location.search);
+      const params = {};
+      const chatId = searchParams.get('chat');
+      const storyId = searchParams.get('story');
+      const create = searchParams.get('create');
+      if (chatId) params.chatId = chatId;
+      if (storyId) params.storyId = storyId;
+      if (create === '1' || create === 'true') params.create = true;
+      setRouteParams(params);
     };
     window.addEventListener('popstate', restoreRoute);
     return () => window.removeEventListener('popstate', restoreRoute);
@@ -449,7 +468,25 @@ const DataProvider = ({ children }) => {
       ? update(current.uid === user?.uid ? current.users : [])
       : update
   })), [user?.uid]);
-  const [stories, setStories] = useState(MOCK_STORIES);
+  const [stories, setStories] = useState(() => {
+    if (typeof window === 'undefined') return [];
+
+    try {
+      const savedStories = JSON.parse(window.localStorage.getItem(STORY_STORAGE_KEY) || '[]');
+      if (!Array.isArray(savedStories)) return [];
+      const expirationCutoff = Date.now() - 24 * 60 * 60 * 1000;
+      return savedStories.filter(story =>
+        story &&
+        typeof story.id === 'string' &&
+        typeof story.image === 'string' &&
+        (!Number.isFinite(story.createdAt) || story.createdAt > expirationCutoff)
+      );
+    } catch (error) {
+      console.error('Unable to load saved stories.', error);
+      return [];
+    }
+  });
+  const storiesRef = useRef(stories);
   const [moments, setMoments] = useState(MOCK_MOMENTS);
   const [savedMessages, setSavedMessages] = useState([]);
   const [activeCall, setActiveCall] = useState(null); // { user, type: 'voice' | 'video' }
@@ -460,23 +497,39 @@ const DataProvider = ({ children }) => {
     setTimeout(() => setToastMessage(null), 3500);
   }, []);
 
+  const updateStories = useCallback((update) => {
+    const nextStories = typeof update === 'function' ? update(storiesRef.current) : update;
+
+    try {
+      window.localStorage.setItem(STORY_STORAGE_KEY, JSON.stringify(nextStories));
+    } catch (error) {
+      console.error('Unable to save stories to browser storage.', error);
+      showToast('Could not save this story. Browser storage may be full.');
+      return false;
+    }
+
+    storiesRef.current = nextStories;
+    setStories(nextStories);
+    return true;
+  }, [showToast]);
+
   const addStory = useCallback((story) => {
     const nextStory = {
       ...story,
-      id: story.id || `story-${Date.now()}`,
+      id: story.id || `story-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       timestamp: story.timestamp || 'Just now',
+      createdAt: story.createdAt || Date.now(),
       likes: Number.isFinite(story.likes) ? story.likes : 0,
       liked: Boolean(story.liked),
       isViewed: Boolean(story.isViewed),
       userId: story.userId || user?.uid || 'u1'
     };
 
-    setStories(current => [nextStory, ...current]);
-    return nextStory.id;
-  }, [user?.uid]);
+    return updateStories(current => [nextStory, ...current]) ? nextStory.id : null;
+  }, [updateStories, user?.uid]);
 
   const toggleStoryLike = useCallback((storyId) => {
-    setStories(current => current.map(story => {
+    return updateStories(current => current.map(story => {
       if (story.id !== storyId) return story;
       const nextLiked = !story.liked;
       return {
@@ -485,7 +538,13 @@ const DataProvider = ({ children }) => {
         likes: Math.max(0, (story.likes || 0) + (nextLiked ? 1 : -1))
       };
     }));
-  }, []);
+  }, [updateStories]);
+
+  const markStoryViewed = useCallback((storyId) => {
+    return updateStories(current => current.map(story =>
+      story.id === storyId ? { ...story, isViewed: true } : story
+    ));
+  }, [updateStories]);
 
   useEffect(() => {
     if (!user?.uid) {
@@ -1024,7 +1083,7 @@ const DataProvider = ({ children }) => {
       sendMessage, sendAttachment, editMessage, deleteMessage, hideConversation,
       hideMessageForMe,
       addReaction, forwardMessage, toggleSaveMessage, votePoll,
-      addStory, toggleStoryLike,
+      addStory, toggleStoryLike, markStoryViewed,
       setActiveCall, showToast
     }}>
       {children}
@@ -2630,10 +2689,14 @@ const ForwardMessageDialog = ({
 };
 
 const StoriesView = () => {
-  const { stories, showToast, addStory, toggleStoryLike } = useContext(DataContext);
+  const { stories, showToast, addStory, toggleStoryLike, markStoryViewed } = useContext(DataContext);
   const { navigate, routeParams } = useContext(RouterContext);
   const { user } = useContext(AuthContext);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    const storyIndex = stories.findIndex(story => story.id === routeParams.storyId);
+    return storyIndex >= 0 ? storyIndex : 0;
+  });
+  const [isPosting, setIsPosting] = useState(false);
   const [draft, setDraft] = useState({
     image: '',
     caption: '',
@@ -2642,6 +2705,16 @@ const StoriesView = () => {
   const storiesEnabled = isVibeStoriesEnabled();
   const isComposerOpen = Boolean(routeParams.create);
 
+  const activeStory = stories[currentIndex] || stories[0] || null;
+  const storyAuthor = activeStory
+    ? (MOCK_USERS.find(u => u.id === activeStory.userId) || (user ? { ...user, name: user.name || 'You' } : MOCK_USERS[0]))
+    : null;
+
+  useEffect(() => {
+    if (!activeStory || activeStory.isViewed) return;
+    markStoryViewed(activeStory.id);
+  }, [activeStory, markStoryViewed]);
+
   useEffect(() => {
     if (!storiesEnabled) {
       showToast('Vibe Stories are turned off in Settings.');
@@ -2649,53 +2722,59 @@ const StoriesView = () => {
     }
   }, [storiesEnabled, navigate, showToast]);
 
-  useEffect(() => {
-    if (!stories.length) {
-      setCurrentIndex(0);
-      return;
-    }
-
-    if (routeParams.storyId) {
-      const matchingIndex = stories.findIndex(story => story.id === routeParams.storyId);
-      if (matchingIndex >= 0) {
-        setCurrentIndex(matchingIndex);
-      }
-    }
-  }, [routeParams.storyId, stories]);
-
-  useEffect(() => {
-    if (!isComposerOpen) {
-      setDraft({ image: '', caption: '', vibe: '✨ Fresh update' });
-    }
-  }, [isComposerOpen]);
-
   if (!storiesEnabled) return null;
-
-  const activeStory = stories[currentIndex] || stories[0] || null;
-  const storyAuthor = activeStory
-    ? (MOCK_USERS.find(u => u.id === activeStory.userId) || (user ? { ...user, name: user.name || 'You' } : MOCK_USERS[0]))
-    : null;
 
   const handleFileSelect = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    if (!file.type.startsWith('image/')) {
+      showToast('Choose an image file for your story.');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      showToast('Choose an image smaller than 12 MB.');
+      event.target.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => {
-      setDraft(prev => ({ ...prev, image: reader.result }));
+      const source = new Image();
+      source.onload = () => {
+        const maxWidth = 1080;
+        const maxHeight = 1920;
+        const scale = Math.min(1, maxWidth / source.width, maxHeight / source.height);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(source.width * scale);
+        canvas.height = Math.round(source.height * scale);
+        const context = canvas.getContext('2d');
+        if (!context) {
+          showToast('Could not prepare this image. Try another photo.');
+          return;
+        }
+        context.drawImage(source, 0, 0, canvas.width, canvas.height);
+        setDraft(prev => ({ ...prev, image: canvas.toDataURL('image/jpeg', 0.78) }));
+      };
+      source.onerror = () => showToast('Could not read this image. Try another photo.');
+      source.src = reader.result;
     };
+    reader.onerror = () => showToast('Could not read this image. Try again.');
     reader.readAsDataURL(file);
+    event.target.value = '';
   };
 
   const createStory = () => {
+    if (isPosting) return;
+    setIsPosting(true);
     const normalizedCaption = draft.caption.trim() || (draft.image ? 'Fresh from my day ✨' : 'Just sharing a moment');
     const normalizedVibe = draft.vibe.trim() || '✨ Fresh update';
-    const storyImage = draft.image || 'https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=900&q=80';
     const author = user || MOCK_USERS[0];
     const createdId = addStory({
-      id: `story-${Date.now()}`,
+      id: `story-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       userId: author.id || author.uid || 'u1',
-      image: storyImage,
+      image: draft.image,
       caption: normalizedCaption,
       timestamp: 'Just now',
       vibe: normalizedVibe,
@@ -2704,6 +2783,9 @@ const StoriesView = () => {
       likes: 0
     });
 
+    setIsPosting(false);
+    if (!createdId) return;
+    setDraft({ image: '', caption: '', vibe: '✨ Fresh update' });
     navigate('/stories', { storyId: createdId });
   };
 
@@ -2752,7 +2834,10 @@ const StoriesView = () => {
                 <p className="text-xs uppercase tracking-[0.2em] text-violet-300">Create story</p>
                 <h3 className="text-xl font-bold text-white">Share a moment</h3>
               </div>
-              <button onClick={() => navigate('/stories')} className="rounded-full bg-white/5 p-2 text-slate-200">
+              <button onClick={() => {
+                setDraft({ image: '', caption: '', vibe: '✨ Fresh update' });
+                navigate('/stories');
+              }} className="rounded-full bg-white/5 p-2 text-slate-200">
                 <X size={18} />
               </button>
             </div>
@@ -2795,10 +2880,11 @@ const StoriesView = () => {
             />
 
             <button
+              disabled={isPosting}
               onClick={createStory}
-              className="mt-5 w-full rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-500/30"
+              className="mt-5 w-full rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-500/30 disabled:cursor-wait disabled:opacity-60"
             >
-              Post Story
+              {isPosting ? 'Posting…' : 'Post Story'}
             </button>
           </div>
         </div>
@@ -2806,7 +2892,11 @@ const StoriesView = () => {
 
       {!isComposerOpen && activeStory && (
         <div className="w-full max-w-sm h-[88vh] bg-slate-900 rounded-[32px] overflow-hidden relative shadow-[0_30px_80px_rgba(15,23,42,0.7)] border border-white/10 flex flex-col justify-between">
-          <img src={activeStory.image} className="absolute inset-0 w-full h-full object-cover" alt="Story" />
+          {activeStory.image ? (
+            <img src={activeStory.image} className="absolute inset-0 w-full h-full object-cover" alt="Story" />
+          ) : (
+            <div className="absolute inset-0 bg-gradient-to-br from-violet-700 via-fuchsia-700 to-slate-900" />
+          )}
           <div className="absolute inset-0 bg-gradient-to-b from-slate-950/55 via-slate-950/10 to-slate-950/80"></div>
 
           <div className="relative z-10 space-y-3 p-4 pt-5">
@@ -2861,7 +2951,7 @@ const StoriesView = () => {
             </div>
           </div>
 
-          <div className="absolute inset-0 flex z-20">
+          <div className="absolute inset-0 flex z-[5]">
             <div className="w-1/2 h-full cursor-pointer" onClick={handlePrevStory}></div>
             <div className="w-1/2 h-full cursor-pointer" onClick={handleNextStory}></div>
           </div>
