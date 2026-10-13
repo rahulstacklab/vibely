@@ -183,19 +183,127 @@
   }
 }
 
+.chat-theme {
+  --chat-wallpaper-color: #f2eff9;
+  --chat-surface-color: #ffffff;
+  --chat-composer-color: #f8f6fc;
+  --chat-outgoing-color: #e2d9f6;
+  --chat-text-color: #29243a;
+  --chat-accent-color: #7657c8;
+  --chat-pattern-color: rgb(86 64 135 / 6%);
+}
+
+.chat-theme-lagoon {
+  --chat-wallpaper-color: #edf6f4;
+  --chat-outgoing-color: #cfe9e3;
+  --chat-accent-color: #247f78;
+  --chat-pattern-color: rgb(36 127 120 / 6%);
+}
+
+.chat-theme-terracotta {
+  --chat-wallpaper-color: #f8f1eb;
+  --chat-outgoing-color: #f1daca;
+  --chat-accent-color: #ae5d3e;
+  --chat-pattern-color: rgb(174 93 62 / 6%);
+}
+
+.chat-theme-meadow {
+  --chat-wallpaper-color: #f0f4ed;
+  --chat-outgoing-color: #d9e8d4;
+  --chat-accent-color: #507d51;
+  --chat-pattern-color: rgb(80 125 81 / 6%);
+}
+
+.chat-theme-berry {
+  --chat-wallpaper-color: #f8eef3;
+  --chat-outgoing-color: #f0d7e3;
+  --chat-accent-color: #a34470;
+  --chat-pattern-color: rgb(163 68 112 / 6%);
+}
+
+.dark .chat-theme {
+  --chat-wallpaper-color: #171722;
+  --chat-surface-color: #252532;
+  --chat-composer-color: #20202c;
+  --chat-outgoing-color: #504467;
+  --chat-text-color: #f3effb;
+  --chat-accent-color: #b6a0ed;
+  --chat-pattern-color: rgb(209 191 250 / 4%);
+}
+
+.dark .chat-theme-lagoon {
+  --chat-wallpaper-color: #142020;
+  --chat-outgoing-color: #315750;
+  --chat-accent-color: #83cbb9;
+  --chat-pattern-color: rgb(131 203 185 / 4%);
+}
+
+.dark .chat-theme-terracotta {
+  --chat-wallpaper-color: #211a19;
+  --chat-outgoing-color: #67483d;
+  --chat-accent-color: #e5a181;
+  --chat-pattern-color: rgb(229 161 129 / 4%);
+}
+
+.dark .chat-theme-meadow {
+  --chat-wallpaper-color: #171f19;
+  --chat-outgoing-color: #3d5941;
+  --chat-accent-color: #a5cd9e;
+  --chat-pattern-color: rgb(165 205 158 / 4%);
+}
+
+.dark .chat-theme-berry {
+  --chat-wallpaper-color: #211821;
+  --chat-outgoing-color: #654052;
+  --chat-accent-color: #e1a0be;
+  --chat-pattern-color: rgb(225 160 190 / 4%);
+}
+
+.chat-theme-header {
+  background-color: var(--chat-surface-color);
+  color: var(--chat-text-color);
+}
+
+.chat-theme-status {
+  color: var(--chat-accent-color);
+}
+
 .chat-wallpaper {
-  background-color: #efeae2;
+  background-color: var(--chat-wallpaper-color);
   background-image:
-    radial-gradient(circle at 20% 20%, rgb(128 115 96 / 5%) 1px, transparent 1.5px),
-    radial-gradient(circle at 80% 70%, rgb(128 115 96 / 4%) 1px, transparent 1.5px);
+    radial-gradient(circle at 20% 20%, var(--chat-pattern-color) 1px, transparent 1.5px),
+    radial-gradient(circle at 80% 70%, var(--chat-pattern-color) 1px, transparent 1.5px);
   background-size: 26px 26px, 34px 34px;
 }
 
-.dark .chat-wallpaper {
-  background-color: #0b141a;
-  background-image:
-    radial-gradient(circle at 20% 20%, rgb(255 255 255 / 2.5%) 1px, transparent 1.5px),
-    radial-gradient(circle at 80% 70%, rgb(255 255 255 / 2%) 1px, transparent 1.5px);
+.chat-message-outgoing {
+  background-color: var(--chat-outgoing-color);
+  color: var(--chat-text-color);
+}
+
+.chat-message-incoming {
+  background-color: var(--chat-surface-color);
+  color: var(--chat-text-color);
+}
+
+.chat-theme-composer {
+  background-color: var(--chat-composer-color);
+}
+
+.chat-composer-field {
+  background-color: var(--chat-surface-color);
+}
+
+.chat-composer-field:focus-within {
+  border-color: var(--chat-accent-color);
+}
+
+.chat-send-button {
+  background-color: var(--chat-accent-color);
+}
+
+.chat-send-button:hover {
+  filter: brightness(0.92);
 }
 
 @media (hover: hover) and (pointer: fine) {

@@ -1832,6 +1832,13 @@ const ChatView = () => {
   const { routeParams, navigate, currentRoute } = useContext(RouterContext);
   const { user } = useContext(AuthContext);
 
+  const chatThemeOptions = [
+    { id: 'amethyst', label: 'Amethyst', swatch: '#7657c8' },
+    { id: 'lagoon', label: 'Lagoon', swatch: '#258b91' },
+    { id: 'terracotta', label: 'Terracotta', swatch: '#c86f50' },
+    { id: 'meadow', label: 'Meadow', swatch: '#568568' },
+    { id: 'berry', label: 'Berry', swatch: '#b6537f' }
+  ];
   const isGroupsRoute = currentRoute === '/groups';
   const activeChatId = routeParams.chatId || null;
   const [inputText, setInputText] = useState('');
@@ -1843,6 +1850,19 @@ const ChatView = () => {
   const [forwardingMessage, setForwardingMessage] = useState(null);
   const [isForwarding, setIsForwarding] = useState(false);
   const [showChatOptions, setShowChatOptions] = useState(false);
+  const [chatThemes, setChatThemes] = useState(() => {
+    try {
+      const storedThemes = JSON.parse(window.localStorage.getItem(`vibely_chat_themes_${user.uid}`) || '{}');
+      return storedThemes && typeof storedThemes === 'object' && !Array.isArray(storedThemes)
+        ? Object.fromEntries(Object.entries(storedThemes).filter(([, theme]) =>
+          ['amethyst', 'lagoon', 'terracotta', 'meadow', 'berry'].includes(theme)
+        ))
+        : {};
+    } catch (error) {
+      console.error('Unable to load saved chat themes.', error);
+      return {};
+    }
+  });
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showJoinGroup, setShowJoinGroup] = useState(false);
   const [showGroupManagement, setShowGroupManagement] = useState(false);
@@ -1858,8 +1878,23 @@ const ChatView = () => {
 
   const activeChat = chats.find(c => c.id === activeChatId);
   const isGroup = activeChat?.isGroup;
+  const activeTheme = chatThemes[activeChatId] || 'amethyst';
   const visibleChats = chats.filter(chat => Boolean(chat.isGroup) === isGroupsRoute);
   const otherUser = !isGroup ? users.find(u => activeChat?.participants.includes(u.id) && u.id !== user.id) : null;
+
+  const handleChatThemeChange = (themeId) => {
+    if (!activeChat) return;
+    try {
+      const preferencesKey = `vibely_chat_themes_${user.uid}`;
+      const savedThemes = JSON.parse(window.localStorage.getItem(preferencesKey) || '{}');
+      const nextThemes = { ...savedThemes, [activeChat.id]: themeId };
+      window.localStorage.setItem(preferencesKey, JSON.stringify(nextThemes));
+      setChatThemes(previous => ({ ...previous, [activeChat.id]: themeId }));
+    } catch (error) {
+      console.error('Unable to save chat theme.', error);
+      showToast(`Couldn't save chat theme: ${error.message}`);
+    }
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2230,11 +2265,11 @@ const ChatView = () => {
       </div>
 
       {/* Main Conversation Window (Right) */}
-      <div className={`flex-1 flex min-w-0 flex-col bg-[#efeae2] dark:bg-[#0b141a] ${!routeParams.chatId && 'hidden md:flex'}`}>
+      <div className={`chat-theme chat-theme-${activeTheme} flex-1 flex min-w-0 flex-col ${!routeParams.chatId && 'hidden md:flex'}`}>
         {activeChat ? (
           <>
             {/* Header */}
-            <div className="shrink-0 bg-white dark:bg-[#202c33] p-3.5 border-b border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between shadow-sm sticky top-0 z-10">
+            <div className="chat-theme-header shrink-0 p-3.5 border-b border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between shadow-sm sticky top-0 z-10">
               <div className="flex items-center space-x-3">
                 <button onClick={() => navigate(isGroup ? '/groups' : '/chats')} className="md:hidden text-slate-500">
                   <ChevronLeft size={22} />
@@ -2250,7 +2285,7 @@ const ChatView = () => {
                   <h2 className="text-sm font-bold text-slate-900 dark:text-white leading-tight">
                     {isGroup ? activeChat.groupName : otherUser?.name || 'Vibely member'}
                   </h2>
-                  <p className="text-[11px] text-emerald-500 font-medium">
+                  <p className="chat-theme-status text-[11px] font-medium">
                     {isGroup ? `${activeChat.participants.length} members · ${activeChat.groupAdmins?.includes(user.id) ? 'Admin' : 'Group'}` : 'Live chat'}
                   </p>
                 </div>
@@ -2265,7 +2300,30 @@ const ChatView = () => {
                   onClick={() => setShowChatOptions(value => !value)}
                 />
                 {showChatOptions && (
-                  <div className="absolute right-0 top-full z-20 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                  <div className="absolute right-0 top-full z-20 mt-2 w-64 rounded-xl border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+                    <div className="px-2 pb-2 pt-1">
+                      <p className="mb-2 text-xs font-semibold text-slate-500 dark:text-slate-400">Chat theme</p>
+                      <div className="grid grid-cols-5 gap-1">
+                        {chatThemeOptions.map(theme => (
+                          <button
+                            key={theme.id}
+                            type="button"
+                            title={theme.label}
+                            aria-label={`${theme.label} chat theme`}
+                            aria-pressed={activeTheme === theme.id}
+                            onClick={() => handleChatThemeChange(theme.id)}
+                            className={`flex flex-col items-center gap-1 rounded-lg px-1 py-1.5 text-[9px] font-medium text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 dark:text-slate-300 dark:hover:bg-slate-800 ${activeTheme === theme.id ? 'bg-slate-100 dark:bg-slate-800' : ''}`}
+                          >
+                            <span
+                              className={`h-6 w-6 rounded-full border-2 border-white shadow-sm ring-1 ring-black/10 dark:border-slate-900 ${activeTheme === theme.id ? 'scale-110' : ''}`}
+                              style={{ backgroundColor: theme.swatch }}
+                            />
+                            {theme.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
                     {isGroup ? (
                       <button
                         type="button"
@@ -2314,7 +2372,7 @@ const ChatView = () => {
                     <div className="max-w-[88%] space-y-1 sm:max-w-[75%]">
                       
                       {/* Bubble */}
-                      <div className={`relative rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed shadow-[0_1px_1px_rgba(11,20,26,0.12)] [overflow-wrap:anywhere] ${isMe ? 'rounded-br-md bg-[#d9fdd3] text-[#111b21] dark:bg-[#005c4b] dark:text-[#e9edef]' : 'rounded-bl-md border border-black/[0.04] bg-white text-[#111b21] dark:border-white/[0.04] dark:bg-[#202c33] dark:text-[#e9edef]'}`}>
+                      <div className={`relative rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed shadow-[0_1px_1px_rgba(11,20,26,0.12)] [overflow-wrap:anywhere] ${isMe ? 'chat-message-outgoing rounded-br-md' : 'chat-message-incoming rounded-bl-md border border-black/[0.04] dark:border-white/[0.04]'}`}>
                         
                         {isGroup && !isMe && (
                           <p className="mb-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
@@ -2596,7 +2654,7 @@ const ChatView = () => {
             </div>
 
             {/* Input Bar */}
-            <div className="shrink-0 border-t border-slate-200/80 bg-[#f0f2f5] p-3 dark:border-slate-700/80 dark:bg-[#202c33]">
+            <div className="chat-theme-composer shrink-0 border-t border-slate-200/80 p-3 dark:border-slate-700/80">
               <form onSubmit={handleSend} className="mx-auto flex max-w-5xl items-center gap-2 sm:gap-3">
                 <input
                   ref={fileInputRef}
@@ -2612,7 +2670,7 @@ const ChatView = () => {
                   onClick={() => fileInputRef.current?.click()}
                 />
                 
-                <div className="flex-1 rounded-full border border-transparent bg-white px-4 py-2.5 transition-all focus-within:border-emerald-500 dark:bg-[#2a3942]">
+                <div className="chat-composer-field flex-1 rounded-full border border-transparent px-4 py-2.5 transition-all">
                   <div className="flex items-center">
                   <Smile size={20} className="text-slate-400 mr-2 shrink-0" />
                   <input
@@ -2627,7 +2685,7 @@ const ChatView = () => {
                 </div>
 
                 {inputText.trim() ? (
-                  <button type="submit" aria-label="Send message" disabled={isUploading || isRecording} className="rounded-full bg-[#00a884] p-3 text-white shadow-sm transition-transform hover:bg-[#008f72] active:scale-95 disabled:opacity-50">
+                  <button type="submit" aria-label="Send message" disabled={isUploading || isRecording} className="chat-send-button rounded-full p-3 text-white shadow-sm transition-transform active:scale-95 disabled:opacity-50">
                     <Send size={18} />
                   </button>
                 ) : (
