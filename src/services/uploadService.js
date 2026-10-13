@@ -24,7 +24,7 @@ const parseResponse = async (response) => {
   return payload;
 };
 
-export const uploadToCloudinary = async (file, { chatId, messageId, type }) => {
+export const uploadToCloudinary = async (file, { chatId, messageId, type, purpose = 'chat' }) => {
   if (!(file instanceof Blob)) {
     throw new Error('A valid File or Blob is required for upload.');
   }
@@ -43,6 +43,7 @@ export const uploadToCloudinary = async (file, { chatId, messageId, type }) => {
       chatId,
       messageId,
       type,
+      purpose,
       fileName: file.name || `${type}-attachment`
     })
   }));

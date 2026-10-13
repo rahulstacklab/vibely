@@ -126,7 +126,7 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.auth.uid == userId
         && request.resource.data.keys().hasOnly([
-          'name', 'username', 'avatar', 'vibe', 'bio', 'createdAt'
+          'name', 'username', 'avatar', 'vibe', 'bio', 'location', 'createdAt'
         ])
         && request.resource.data.name is string
         && request.resource.data.username is string
@@ -134,7 +134,7 @@ service cloud.firestore {
       allow update: if signedIn()
         && request.auth.uid == userId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'name', 'username', 'avatar', 'vibe', 'bio'
+          'name', 'username', 'avatar', 'vibe', 'bio', 'location'
         ]);
       allow delete: if false;
     }

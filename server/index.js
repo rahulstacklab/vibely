@@ -83,10 +83,12 @@ const server = createServer(async (request, response) => {
 
     const body = JSON.parse(rawBody);
     const { chatId, messageId, type, fileName } = body;
+    const purpose = body.purpose || 'chat';
     if (
-      !safeId.test(chatId || '') ||
-      !safeId.test(messageId || '') ||
       !['image', 'video', 'document', 'voice'].includes(type) ||
+      !['chat', 'profile'].includes(purpose) ||
+      (purpose === 'profile' && type !== 'image') ||
+      (purpose === 'chat' && (!safeId.test(chatId || '') || !safeId.test(messageId || ''))) ||
       typeof fileName !== 'string' ||
       !fileName.trim()
     ) {
@@ -94,7 +96,8 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    const chatResponse = await fetch(
+    if (purpose === 'chat') {
+      const chatResponse = await fetch(
       `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/chats/${encodeURIComponent(chatId)}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
@@ -112,6 +115,7 @@ const server = createServer(async (request, response) => {
       response.writeHead(403).end(JSON.stringify({ error: 'You are not a member of this conversation.' }));
       return;
     }
+    }
 
     const resourceType = type === 'image' ? 'image'
       : type === 'document' ? 'raw'
@@ -121,9 +125,13 @@ const server = createServer(async (request, response) => {
     const baseName = (extensionIndex > 0 ? originalName.slice(0, extensionIndex) : originalName)
       .replace(/[^A-Za-z0-9_-]/g, '_')
       .slice(0, 80) || 'attachment';
-    const folder = `vibely/chats/${chatId}/${uid}`;
+    const folder = purpose === 'profile'
+      ? `vibely/profiles/${uid}`
+      : `vibely/chats/${chatId}/${uid}`;
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    const publicId = `${messageId}-${baseName}`;
+    const publicId = purpose === 'profile'
+      ? `profile-${timestamp}-${baseName}`
+      : `${messageId}-${baseName}`;
     const parameters = {
       folder,
       overwrite: 'false',
