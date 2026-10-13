@@ -56,16 +56,19 @@ export async function onRequestPost({ request, env }) {
       return json({ error: 'Invalid request body.' }, 400);
     }
     const { chatId, messageId, type, fileName } = body;
+    const purpose = body.purpose || 'chat';
     if (
-      !validId.test(chatId || '') ||
-      !validId.test(messageId || '') ||
       !['image', 'video', 'document', 'voice'].includes(type) ||
+      !['chat', 'profile', 'moment'].includes(purpose) ||
+      (purpose !== 'chat' && type !== 'image') ||
+      (purpose === 'chat' && (!validId.test(chatId || '') || !validId.test(messageId || ''))) ||
       typeof fileName !== 'string' ||
       !fileName.trim()
     ) {
       return json({ error: 'Invalid upload details.' }, 400);
     }
 
+    if (purpose === 'chat') {
     const chatResponse = await fetch(
       `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/chats/${encodeURIComponent(chatId)}`,
       { headers: { Authorization: `Bearer ${token}` } }
@@ -83,6 +86,7 @@ export async function onRequestPost({ request, env }) {
     if (!participants.some(participant => participant.stringValue === uid)) {
       return json({ error: 'You are not a member of this conversation.' }, 403);
     }
+    }
 
     const resourceType = type === 'image' ? 'image'
       : type === 'document' ? 'raw'
@@ -92,9 +96,13 @@ export async function onRequestPost({ request, env }) {
     const baseName = (extensionIndex > 0 ? originalName.slice(0, extensionIndex) : originalName)
       .replace(/[^A-Za-z0-9_-]/g, '_')
       .slice(0, 80) || 'attachment';
-    const folder = `vibely/chats/${chatId}/${uid}`;
+    const folder = purpose === 'chat'
+      ? `vibely/chats/${chatId}/${uid}`
+      : `vibely/${purpose === 'profile' ? 'profiles' : 'moments'}/${uid}`;
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    const publicId = `${messageId}-${baseName}`;
+    const publicId = purpose === 'chat'
+      ? `${messageId}-${baseName}`
+      : `${purpose}-${timestamp}-${baseName}`;
     const parameters = {
       folder,
       overwrite: 'false',
