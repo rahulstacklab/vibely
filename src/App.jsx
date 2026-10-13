@@ -1032,8 +1032,9 @@ const DataProvider = ({ children }) => {
       }
       const uploadedImage = await uploadToCloudinary(avatarFile, {
         chatId,
+        messageId: `group-profile-${crypto.randomUUID().replaceAll('-', '')}`,
         type: 'image',
-        purpose: 'group'
+        purpose: 'chat'
       });
       updates.groupAvatar = uploadedImage.secureUrl;
     }
