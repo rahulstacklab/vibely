@@ -3,10 +3,15 @@ import { useState, useEffect, useContext, createContext, useRef, useCallback, us
 import {
   browserLocalPersistence,
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   setPersistence,
+  sendEmailVerification,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
+  updatePassword,
   updateProfile
 } from 'firebase/auth';
 import {
@@ -338,6 +343,27 @@ const AuthProvider = ({ children }) => {
 
   const logout = () => signOut(auth);
 
+  const resetPassword = async (email) => {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) throw new Error('Enter the email address for your account.');
+    await sendPasswordResetEmail(auth, normalizedEmail);
+  };
+
+  const changePassword = async (currentPassword, newPassword) => {
+    const firebaseUser = auth.currentUser;
+    if (!firebaseUser?.email) throw new Error('Sign in with an email and password to change your password.');
+    if (newPassword.length < 6) throw new Error('Your new password must be at least 6 characters.');
+    const credential = EmailAuthProvider.credential(firebaseUser.email, currentPassword);
+    await reauthenticateWithCredential(firebaseUser, credential);
+    await updatePassword(firebaseUser, newPassword);
+  };
+
+  const resendVerificationEmail = async () => {
+    if (!auth.currentUser) throw new Error('Sign in before verifying your email.');
+    if (auth.currentUser.emailVerified) return;
+    await sendEmailVerification(auth.currentUser);
+  };
+
   const register = async ({ fullName, email, password }) => {
     const credential = await createUserWithEmailAndPassword(auth, email, password);
     const name = fullName.trim();
@@ -361,7 +387,10 @@ const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, setUser, login, logout, register, authLoading, authError, isOnboarding, setIsOnboarding }}>
+    <AuthContext.Provider value={{
+      user, setUser, login, logout, register, resetPassword, changePassword,
+      resendVerificationEmail, authLoading, authError, isOnboarding, setIsOnboarding
+    }}>
       {children}
     </AuthContext.Provider>
   );
@@ -1376,7 +1405,16 @@ const Toast = ({ message }) => {
 const Sidebar = () => {
   const { currentRoute, navigate } = useContext(RouterContext);
   const { logout, user } = useContext(AuthContext);
+  const { showToast } = useContext(DataContext);
   const { isDark, toggleTheme } = useContext(ThemeContext);
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (error) {
+      console.error('Unable to sign out.', error);
+      showToast(`Couldn't sign out: ${error.message}`);
+    }
+  };
 
   const navItems = [
     { id: '/', icon: Home, label: 'Feed & Home' },
@@ -1447,7 +1485,7 @@ const Sidebar = () => {
             {user.name} · Profile
           </span>
         </div>
-        <button aria-label="Log out" onClick={logout} className="group/logout relative w-full flex justify-center text-slate-400 hover:text-rose-500 p-2.5">
+        <button aria-label="Log out" onClick={handleLogout} className="group/logout relative w-full flex justify-center text-slate-400 hover:text-rose-500 p-2.5">
             <LogOut size={18} />
             <span className="pointer-events-none invisible absolute left-full top-1/2 z-[60] ml-3 -translate-y-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/logout:visible group-hover/logout:opacity-100 group-focus-visible/logout:visible group-focus-visible/logout:opacity-100 dark:bg-slate-700">
               Log out
@@ -1461,6 +1499,7 @@ const Sidebar = () => {
 const BottomNav = () => {
   const { currentRoute, navigate } = useContext(RouterContext);
   const { user, logout } = useContext(AuthContext);
+  const { showToast } = useContext(DataContext);
   const { isDark, toggleTheme } = useContext(ThemeContext);
   const [showMore, setShowMore] = useState(false);
 
@@ -1477,6 +1516,15 @@ const BottomNav = () => {
     { id: '/settings', icon: Settings, label: 'Settings' },
     ...(user?.role === 'admin' ? [{ id: '/admin', icon: Shield, label: 'Admin panel' }] : [])
   ];
+  const handleLogout = async () => {
+    try {
+      await logout();
+      setShowMore(false);
+    } catch (error) {
+      console.error('Unable to sign out.', error);
+      showToast(`Couldn't sign out: ${error.message}`);
+    }
+  };
 
   return (
     <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-950/95 backdrop-blur-xl border-t border-slate-200/80 dark:border-slate-800/80 pb-safe z-40">
@@ -1509,7 +1557,7 @@ const BottomNav = () => {
           </button>
           <button
             type="button"
-            onClick={logout}
+            onClick={handleLogout}
             className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
           >
             <LogOut size={19} />
@@ -4015,8 +4063,56 @@ const isVibeStoriesEnabled = () => {
 
 const SettingsView = () => {
   const { showToast } = useContext(DataContext);
+  const { changePassword, resendVerificationEmail } = useContext(AuthContext);
+  const emailVerified = auth.currentUser?.emailVerified ?? true;
   const [expandedSection, setExpandedSection] = useState('privacy');
   const [settings, setSettings] = useState(() => getSavedSettings());
+  const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [isSendingVerification, setIsSendingVerification] = useState(false);
+
+  const handleChangePassword = async (event) => {
+    event.preventDefault();
+    if (newPassword !== confirmPassword) {
+      showToast('New passwords do not match.');
+      return;
+    }
+    setIsChangingPassword(true);
+    try {
+      await changePassword(currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setIsPasswordDialogOpen(false);
+      showToast('Password updated successfully.');
+    } catch (error) {
+      console.error('Unable to change password.', error);
+      const message = error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential'
+        ? 'Current password is incorrect.'
+        : error.code === 'auth/requires-recent-login'
+          ? 'Please sign out and sign in again before changing your password.'
+          : error.message;
+      showToast(`Couldn't change password: ${message}`);
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    setIsSendingVerification(true);
+    try {
+      await resendVerificationEmail();
+      showToast('Verification email sent. Check your inbox.');
+    } catch (error) {
+      console.error('Unable to send verification email.', error);
+      showToast(`Couldn't send verification email: ${error.message}`);
+    } finally {
+      setIsSendingVerification(false);
+    }
+  };
 
   useEffect(() => {
     window.localStorage.setItem('vibely_settings', JSON.stringify(settings));
@@ -4072,17 +4168,10 @@ const SettingsView = () => {
     {
       id: 'security',
       title: 'Security & Password',
-      desc: 'Two-factor auth and active sessions',
+      desc: 'Manage your password and account verification',
       icon: Lock,
-      options: [
-        { key: 'twoFactor', label: 'Two-factor auth', hint: 'Require an extra verification step for sign-in.' },
-        { key: 'loginAlerts', label: 'Login alerts', hint: 'Get notified whenever a new device signs in.' },
-        { key: 'activeSessions', label: 'Active sessions', hint: 'Review sessions currently signed into your account.' },
-        { key: 'biometricUnlock', label: 'Biometric unlock', hint: 'Use Face ID or fingerprint on supported devices.' }
-      ],
       actions: [
-        { label: 'Change password', variant: 'secondary' },
-        { label: 'Review devices', variant: 'secondary' }
+        { label: 'Change password', variant: 'secondary' }
       ]
     },
     {
@@ -4106,6 +4195,18 @@ const SettingsView = () => {
     <div className="flex-1 p-4 md:p-8 bg-slate-50 dark:bg-slate-900 overflow-y-auto pb-24 md:pb-8">
       <div className="max-w-3xl mx-auto space-y-6">
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Settings</h1>
+
+        {!emailVerified && (
+          <section className="flex flex-col items-start justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40 sm:flex-row sm:items-center">
+            <div>
+              <h2 className="text-sm font-bold text-amber-900 dark:text-amber-200">Verify your email address</h2>
+              <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">Confirm your email to help keep your account secure.</p>
+            </div>
+            <button type="button" onClick={handleResendVerification} disabled={isSendingVerification} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-60">
+              {isSendingVerification ? 'Sending…' : 'Resend email'}
+            </button>
+          </section>
+        )}
 
         <div className="bg-white dark:bg-slate-950 rounded-3xl border border-slate-200/80 dark:border-slate-800/80 overflow-hidden">
           {sections.map((section) => {
@@ -4164,8 +4265,7 @@ const SettingsView = () => {
                           const onAction = () => {
                             if (action.label === 'Reset preferences') return resetSettings();
                             if (action.label === 'Clear cache') return clearStorage();
-                            if (action.label === 'Change password') return showToast('Password change flow is ready for implementation.');
-                            if (action.label === 'Review devices') return showToast('Session review is available in your security dashboard.');
+                            if (action.label === 'Change password') return setIsPasswordDialogOpen(true);
                             return undefined;
                           };
 
@@ -4194,6 +4294,34 @@ const SettingsView = () => {
             );
           })}
         </div>
+        {isPasswordDialogOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <form onSubmit={handleChangePassword} className="w-full max-w-md space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-950">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Change password</h2>
+                  <p className="mt-1 text-xs text-slate-500">Confirm your current password to continue.</p>
+                </div>
+                <button type="button" aria-label="Close" onClick={() => setIsPasswordDialogOpen(false)} className="rounded-full p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={18} /></button>
+              </div>
+              <label className="block space-y-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Current password
+                <input type="password" autoComplete="current-password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} required className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
+              </label>
+              <label className="block space-y-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                New password
+                <input type="password" autoComplete="new-password" minLength={6} value={newPassword} onChange={event => setNewPassword(event.target.value)} required className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
+              </label>
+              <label className="block space-y-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Confirm new password
+                <input type="password" autoComplete="new-password" minLength={6} value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} required className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white" />
+              </label>
+              <button type="submit" disabled={isChangingPassword} className="w-full rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 disabled:opacity-60">
+                {isChangingPassword ? 'Updating…' : 'Update password'}
+              </button>
+            </form>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -4307,12 +4435,14 @@ const ActiveCallOverlay = () => {
 };
 
 const AuthGate = () => {
-  const { user, authLoading, authError, login, register } = useContext(AuthContext);
+  const { user, authLoading, authError, login, register, resetPassword } = useContext(AuthContext);
   const [isRegistering, setIsRegistering] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (authLoading) {
@@ -4341,9 +4471,15 @@ const AuthGate = () => {
   const handleSubmit = async (event) => {
     event.preventDefault();
     setErrorMessage('');
+    setStatusMessage('');
     setIsSubmitting(true);
 
     try {
+      if (isResettingPassword) {
+        await resetPassword(email);
+        setStatusMessage('If an account exists for that email, a password reset link has been sent.');
+        return;
+      }
       if (isRegistering) {
         await register({ fullName, email: email.trim(), password });
       } else {
@@ -4355,10 +4491,19 @@ const AuthGate = () => {
         'auth/email-already-in-use': 'An account already exists for this email. Sign in instead.',
         'auth/invalid-credential': 'Email or password is incorrect.',
         'auth/invalid-email': 'Enter a valid email address.',
+        'auth/too-many-requests': 'Too many attempts. Wait a while and try again.',
+        'auth/user-not-found': 'If an account exists for that email, a password reset link has been sent.',
+        'auth/user-disabled': 'This account is disabled. Contact support for help.',
         'auth/weak-password': 'Use a password with at least 6 characters.',
         'auth/network-request-failed': 'Network error. Check your connection and try again.'
       };
-      setErrorMessage(messages[error.code] || error.message || 'Unable to authenticate. Please try again.');
+      if (isResettingPassword && error.code === 'auth/user-not-found') {
+        setStatusMessage(messages[error.code]);
+      } else {
+        setErrorMessage(messages[error.code] || error.message || (isResettingPassword
+          ? 'Unable to send a password reset email. Please try again.'
+          : 'Unable to authenticate. Please try again.'));
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -4373,7 +4518,11 @@ const AuthGate = () => {
           </div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Welcome to Vibely</h1>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-            {isRegistering ? 'Create an account and meet your people.' : 'Sign in to catch up and chat live.'}
+            {isResettingPassword
+              ? 'Enter your account email and we’ll send a secure password reset link.'
+              : isRegistering
+                ? 'Create an account and meet your people.'
+                : 'Sign in to catch up and chat live.'}
           </p>
         </div>
 
@@ -4383,7 +4532,7 @@ const AuthGate = () => {
               {authError}
             </p>
           )}
-          {isRegistering && (
+          {isRegistering && !isResettingPassword && (
             <label className="block space-y-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">
               Name
               <input
@@ -4409,22 +4558,27 @@ const AuthGate = () => {
               placeholder="you@example.com"
             />
           </label>
-          <label className="block space-y-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">
+          {!isResettingPassword && <label className="block space-y-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">
             Password
             <input
               required
               type="password"
-              minLength={6}
+              minLength={isRegistering ? 6 : undefined}
               autoComplete={isRegistering ? 'new-password' : 'current-password'}
               value={password}
               onChange={event => setPassword(event.target.value)}
               className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-violet-500 dark:border-slate-700 dark:bg-slate-900"
               placeholder="At least 6 characters"
             />
-          </label>
+          </label>}
           {errorMessage && (
             <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
               {errorMessage}
+            </p>
+          )}
+          {statusMessage && (
+            <p role="status" className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+              {statusMessage}
             </p>
           )}
           <button
@@ -4432,22 +4586,54 @@ const AuthGate = () => {
             disabled={isSubmitting}
             className="w-full rounded-xl bg-violet-600 px-4 py-3 font-semibold text-white transition hover:bg-violet-700 disabled:cursor-wait disabled:opacity-60"
           >
-            {isSubmitting ? 'Please wait…' : isRegistering ? 'Create account' : 'Sign in'}
+            {isSubmitting ? 'Please wait…' : isResettingPassword ? 'Send reset link' : isRegistering ? 'Create account' : 'Sign in'}
           </button>
         </form>
+        {!isResettingPassword && !isRegistering && (
+          <p className="mt-4 text-center text-sm">
+            <button
+              type="button"
+              onClick={() => {
+                setIsResettingPassword(true);
+                setErrorMessage('');
+                setStatusMessage('');
+              }}
+              className="font-semibold text-violet-600 hover:underline dark:text-violet-400"
+            >
+              Forgot password?
+            </button>
+          </p>
+        )}
         <p className="mt-6 text-center text-sm text-slate-500 dark:text-slate-400">
           {isRegistering ? 'Already have an account?' : 'New to Vibely?'}{' '}
           <button
             type="button"
             onClick={() => {
+              setIsResettingPassword(false);
               setIsRegistering(value => !value);
               setErrorMessage('');
+              setStatusMessage('');
             }}
             className="font-semibold text-violet-600 hover:underline dark:text-violet-400"
           >
             {isRegistering ? 'Sign in' : 'Create an account'}
           </button>
         </p>
+        {isResettingPassword && (
+          <p className="mt-3 text-center text-sm">
+            <button
+              type="button"
+              onClick={() => {
+                setIsResettingPassword(false);
+                setErrorMessage('');
+                setStatusMessage('');
+              }}
+              className="font-semibold text-violet-600 hover:underline dark:text-violet-400"
+            >
+              Back to sign in
+            </button>
+          </p>
+        )}
       </section>
     </main>
   );
