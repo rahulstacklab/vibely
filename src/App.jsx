@@ -2230,11 +2230,11 @@ const ChatView = () => {
       </div>
 
       {/* Main Conversation Window (Right) */}
-      <div className={`flex-1 flex flex-col bg-slate-100/50 dark:bg-slate-900/50 ${!routeParams.chatId && 'hidden md:flex'}`}>
+      <div className={`flex-1 flex min-w-0 flex-col bg-[#efeae2] dark:bg-[#0b141a] ${!routeParams.chatId && 'hidden md:flex'}`}>
         {activeChat ? (
           <>
             {/* Header */}
-            <div className="bg-white dark:bg-slate-950 p-3.5 border-b border-slate-200/80 dark:border-slate-800/80 flex items-center justify-between shadow-sm sticky top-0 z-10">
+            <div className="shrink-0 bg-white dark:bg-[#202c33] p-3.5 border-b border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between shadow-sm sticky top-0 z-10">
               <div className="flex items-center space-x-3">
                 <button onClick={() => navigate(isGroup ? '/groups' : '/chats')} className="md:hidden text-slate-500">
                   <ChevronLeft size={22} />
@@ -2294,9 +2294,10 @@ const ChatView = () => {
             </div>
 
             {/* Messages Scroll Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              <div className="flex justify-center my-2">
-                <span className="text-[11px] font-semibold bg-white dark:bg-slate-800 text-slate-500 px-3 py-1 rounded-full shadow-sm border border-slate-100 dark:border-slate-700">
+            <div className="chat-wallpaper min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-6 sm:py-6">
+              <div className="mx-auto max-w-5xl space-y-3.5">
+              <div className="flex justify-center py-1">
+                <span className="rounded-lg border border-black/5 bg-[#fef7e8]/95 px-3 py-1.5 text-center text-[11px] font-medium text-slate-600 shadow-sm dark:border-white/5 dark:bg-[#182229]/95 dark:text-slate-300">
                   Live messages • Your conversation is saved to your account
                 </span>
               </div>
@@ -2309,14 +2310,14 @@ const ChatView = () => {
                 }), {});
 
                 return (
-                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'} group`}>
-                    <div className={`max-w-[80%] md:max-w-[65%] space-y-1`}>
+                  <div key={msg.id} className={`group flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    <div className="max-w-[88%] space-y-1 sm:max-w-[75%]">
                       
                       {/* Bubble */}
-                      <div className={`p-3.5 rounded-3xl shadow-sm relative text-sm ${isMe ? 'bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white rounded-br-xs' : 'bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-bl-xs border border-slate-200/80 dark:border-slate-800/80'}`}>
+                      <div className={`relative rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed shadow-[0_1px_1px_rgba(11,20,26,0.12)] [overflow-wrap:anywhere] ${isMe ? 'rounded-br-md bg-[#d9fdd3] text-[#111b21] dark:bg-[#005c4b] dark:text-[#e9edef]' : 'rounded-bl-md border border-black/[0.04] bg-white text-[#111b21] dark:border-white/[0.04] dark:bg-[#202c33] dark:text-[#e9edef]'}`}>
                         
                         {isGroup && !isMe && (
-                          <p className="mb-1 text-xs font-semibold text-violet-600 dark:text-violet-400">
+                          <p className="mb-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
                             {users.find(profile => profile.id === msg.senderId)?.name || 'Group member'}
                           </p>
                         )}
@@ -2455,14 +2456,14 @@ const ChatView = () => {
                               title={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
                               className={msg.readBy?.some(uid => uid !== user.id)
                                 ? 'text-sky-300'
-                                : 'text-white/60'}
+                                : isMe ? 'text-slate-500/80 dark:text-white/60' : 'text-slate-400'}
                             />
                           )}
                         </div>
                       </div>
 
                       {/* Action icons on hover */}
-                      <div className={`flex flex-wrap items-center gap-1 px-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`chat-message-actions flex flex-wrap items-center gap-1 px-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
                         <div className="relative">
                           <button
                             type="button"
@@ -2591,11 +2592,12 @@ const ChatView = () => {
                 );
               })}
               <div ref={messagesEndRef} />
+              </div>
             </div>
 
             {/* Input Bar */}
-            <div className="p-3 bg-white dark:bg-slate-950 border-t border-slate-200/80 dark:border-slate-800/80">
-              <form onSubmit={handleSend} className="flex items-center space-x-2 max-w-4xl mx-auto">
+            <div className="shrink-0 border-t border-slate-200/80 bg-[#f0f2f5] p-3 dark:border-slate-700/80 dark:bg-[#202c33]">
+              <form onSubmit={handleSend} className="mx-auto flex max-w-5xl items-center gap-2 sm:gap-3">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -2610,20 +2612,22 @@ const ChatView = () => {
                   onClick={() => fileInputRef.current?.click()}
                 />
                 
-                <div className="flex-1 bg-slate-100 dark:bg-slate-900 rounded-3xl flex items-center px-4 py-2 border border-transparent focus-within:border-violet-500 transition-all">
+                <div className="flex-1 rounded-full border border-transparent bg-white px-4 py-2.5 transition-all focus-within:border-emerald-500 dark:bg-[#2a3942]">
+                  <div className="flex items-center">
                   <Smile size={20} className="text-slate-400 mr-2 shrink-0" />
                   <input
                   disabled={isUploading || isRecording}
                     type="text"
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
-                    placeholder="Type a vibe or message..."
+                    placeholder="Type a message"
                     className="w-full bg-transparent text-sm text-slate-900 dark:text-white focus:outline-none"
                   />
+                  </div>
                 </div>
 
                 {inputText.trim() ? (
-                  <button type="submit" disabled={isUploading || isRecording} className="bg-violet-600 hover:bg-violet-700 text-white p-3 rounded-2xl transition-transform active:scale-95 shadow-md shadow-violet-500/20 disabled:opacity-50">
+                  <button type="submit" aria-label="Send message" disabled={isUploading || isRecording} className="rounded-full bg-[#00a884] p-3 text-white shadow-sm transition-transform hover:bg-[#008f72] active:scale-95 disabled:opacity-50">
                     <Send size={18} />
                   </button>
                 ) : (

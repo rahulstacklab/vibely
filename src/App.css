@@ -182,3 +182,32 @@
     border-right-color: var(--border);
   }
 }
+
+.chat-wallpaper {
+  background-color: #efeae2;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgb(128 115 96 / 5%) 1px, transparent 1.5px),
+    radial-gradient(circle at 80% 70%, rgb(128 115 96 / 4%) 1px, transparent 1.5px);
+  background-size: 26px 26px, 34px 34px;
+}
+
+.dark .chat-wallpaper {
+  background-color: #0b141a;
+  background-image:
+    radial-gradient(circle at 20% 20%, rgb(255 255 255 / 2.5%) 1px, transparent 1.5px),
+    radial-gradient(circle at 80% 70%, rgb(255 255 255 / 2%) 1px, transparent 1.5px);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chat-message-actions {
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+
+  .group:hover .chat-message-actions,
+  .group:focus-within .chat-message-actions {
+    visibility: visible;
+    opacity: 1;
+  }
+}
