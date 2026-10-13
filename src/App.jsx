@@ -1570,7 +1570,23 @@ const DashboardView = () => {
   const { navigate } = useContext(RouterContext);
   const { user, setUser } = useContext(AuthContext);
   const storiesEnabled = isVibeStoriesEnabled();
-  const visibleStories = stories.slice(0, 8);
+  const visibleStories = useMemo(() => {
+    const storiesByAuthor = new Map();
+    stories.forEach(story => {
+      const authorStories = storiesByAuthor.get(story.userId) || [];
+      authorStories.push(story);
+      storiesByAuthor.set(story.userId, authorStories);
+    });
+    return [...storiesByAuthor.values()]
+      .map(authorStories => ({
+        stories: authorStories,
+        latestStory: authorStories[0],
+        entryStory: authorStories.find(story => !story.isViewed) || authorStories[0],
+        isViewed: authorStories.every(story => story.isViewed)
+      }))
+      .sort((first, second) => second.latestStory.createdAt - first.latestStory.createdAt)
+      .slice(0, 8);
+  }, [stories]);
 
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50 dark:bg-slate-900 pb-24 md:pb-8">
@@ -1613,19 +1629,19 @@ const DashboardView = () => {
                   No stories yet. Share your first moment.
                 </div>
               ) : (
-                visibleStories.map(story => {
-                  const author = story.userId === user?.uid
+                visibleStories.map(({ entryStory, latestStory, isViewed }) => {
+                  const author = latestStory.userId === user?.uid
                     ? { ...user, name: user.name || 'You' }
-                    : users.find(profile => profile.id === story.userId)
-                      || MOCK_USERS.find(profile => profile.id === story.userId)
+                    : users.find(profile => profile.id === latestStory.userId)
+                      || MOCK_USERS.find(profile => profile.id === latestStory.userId)
                       || { name: 'Vibely friend', avatar: '' };
                   return (
                     <div 
-                      key={story.id} 
-                      onClick={() => navigate('/stories', { storyId: story.id })}
+                      key={latestStory.userId}
+                      onClick={() => navigate('/stories', { storyId: entryStory.id })}
                       className="flex flex-col items-center space-y-1.5 shrink-0 cursor-pointer"
                     >
-                      <StoryRing src={author.avatar} isViewed={story.isViewed} />
+                      <StoryRing src={author.avatar} isViewed={isViewed} />
                       <span className="text-[11px] font-medium text-slate-700 dark:text-slate-300 truncate w-16 text-center">
                         {author.name.split(' ')[0]}
                       </span>
