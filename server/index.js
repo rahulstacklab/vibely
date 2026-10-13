@@ -86,8 +86,8 @@ const server = createServer(async (request, response) => {
     const purpose = body.purpose || 'chat';
     if (
       !['image', 'video', 'document', 'voice'].includes(type) ||
-      !['chat', 'profile'].includes(purpose) ||
-      (purpose === 'profile' && type !== 'image') ||
+      !['chat', 'profile', 'moment'].includes(purpose) ||
+      (purpose !== 'chat' && type !== 'image') ||
       (purpose === 'chat' && (!safeId.test(chatId || '') || !safeId.test(messageId || ''))) ||
       typeof fileName !== 'string' ||
       !fileName.trim()
@@ -125,13 +125,13 @@ const server = createServer(async (request, response) => {
     const baseName = (extensionIndex > 0 ? originalName.slice(0, extensionIndex) : originalName)
       .replace(/[^A-Za-z0-9_-]/g, '_')
       .slice(0, 80) || 'attachment';
-    const folder = purpose === 'profile'
-      ? `vibely/profiles/${uid}`
-      : `vibely/chats/${chatId}/${uid}`;
+    const folder = purpose === 'chat'
+      ? `vibely/chats/${chatId}/${uid}`
+      : `vibely/${purpose === 'profile' ? 'profiles' : 'moments'}/${uid}`;
     const timestamp = Math.floor(Date.now() / 1000).toString();
-    const publicId = purpose === 'profile'
-      ? `profile-${timestamp}-${baseName}`
-      : `${messageId}-${baseName}`;
+    const publicId = purpose === 'chat'
+      ? `${messageId}-${baseName}`
+      : `${purpose}-${timestamp}-${baseName}`;
     const parameters = {
       folder,
       overwrite: 'false',
