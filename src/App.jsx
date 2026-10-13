@@ -3803,6 +3803,7 @@ const SavedMessagesView = () => {
 const ProfileView = () => {
   const { user, setUser } = useContext(AuthContext);
   const { showToast } = useContext(DataContext);
+  const [isEditing, setIsEditing] = useState(false);
   const [form, setForm] = useState(() => ({
     name: user.name || '',
     username: (user.username || '').replace(/^@/, ''),
@@ -3894,6 +3895,7 @@ const ProfileView = () => {
       }
       setUser(previous => ({ ...previous, ...updatedProfile }));
       setSelectedImage(null);
+      setIsEditing(false);
       showToast(authNameSyncError
         ? `Profile saved, but the sign-in display name could not be synced: ${authNameSyncError.message}`
         : 'Profile updated successfully.');
@@ -3911,11 +3913,47 @@ const ProfileView = () => {
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50 p-4 pb-24 dark:bg-slate-900 md:p-8 md:pb-8">
       <div className="mx-auto max-w-3xl space-y-6">
-        <header>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Your profile</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Update how you appear to other Vibely members.</p>
+        <header className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Your profile</h1>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              {isEditing ? 'Update how you appear to other Vibely members.' : 'View how you appear to other Vibely members.'}
+            </p>
+          </div>
+          {!isEditing && (
+            <button
+              type="button"
+              onClick={() => setIsEditing(true)}
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700"
+            >
+              <User size={16} />
+              Edit Profile
+            </button>
+          )}
         </header>
 
+        {!isEditing ? (
+          <section className="space-y-6 rounded-3xl border border-slate-200/80 bg-white p-5 dark:border-slate-800 dark:bg-slate-950 md:p-8">
+            <div className="flex flex-col items-center gap-5 border-b border-slate-100 pb-6 dark:border-slate-800 sm:flex-row sm:items-start">
+              <Avatar src={user.avatar} size="xl" />
+              <div className="min-w-0 text-center sm:text-left">
+                <h2 className="break-words text-2xl font-bold text-slate-900 dark:text-white">{user.name || 'Your name'}</h2>
+                {user.username && <p className="mt-1 text-sm text-violet-600 dark:text-violet-400">{user.username.startsWith('@') ? user.username : `@${user.username}`}</p>}
+                {user.vibe && <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{user.vibe}</p>}
+              </div>
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">About</h3>
+              <p className="mt-2 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">{user.bio || 'No bio added yet.'}</p>
+            </div>
+            {user.location && (
+              <div>
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Location</h3>
+                <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">{user.location}</p>
+              </div>
+            )}
+          </section>
+        ) : (
         <form onSubmit={saveProfile} className="space-y-6 rounded-3xl border border-slate-200/80 bg-white p-5 dark:border-slate-800 dark:bg-slate-950 md:p-8">
           <div className="flex flex-col items-center gap-4 border-b border-slate-100 pb-6 dark:border-slate-800 sm:flex-row">
             <Avatar src={displayedAvatar} size="xl" />
@@ -3958,13 +3996,32 @@ const ProfileView = () => {
             <span className="block text-right text-[11px] text-slate-400">{form.bio.length}/240</span>
           </label>
 
-          <div className="flex justify-end border-t border-slate-100 pt-4 dark:border-slate-800">
+          <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                setForm({
+                  name: user.name || '',
+                  username: (user.username || '').replace(/^@/, ''),
+                  bio: user.bio || '',
+                  location: user.location || '',
+                  vibe: user.vibe || ''
+                });
+                setSelectedImage(null);
+                setIsEditing(false);
+              }}
+              disabled={isSaving}
+              className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
+            >
+              Cancel
+            </button>
             <button type="submit" disabled={isSaving} className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-60">
               <Save size={16} />
               {isSaving ? 'Saving profile…' : 'Save changes'}
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   );
