@@ -2111,9 +2111,9 @@ const ChatView = () => {
                 className={`flex items-center p-3 rounded-2xl cursor-pointer transition-all ${isSelected ? 'bg-violet-50 dark:bg-violet-950/40 border border-violet-200/50 dark:border-violet-900/40' : 'hover:bg-slate-50 dark:hover:bg-slate-900/50'}`}
               >
                 {chatIsGroup ? (
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white">
-                    <Users size={20} />
-                  </div>
+                  chat.groupAvatar
+                    ? <img src={chat.groupAvatar} alt={`${chat.groupName || 'Group'} image`} className="h-11 w-11 shrink-0 rounded-full object-cover" />
+                    : <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white"><Users size={20} /></div>
                 ) : (
                   <Avatar src={targetUser?.avatar} isOnline={targetUser?.isOnline} vibe={targetUser?.vibe} />
                 )}
