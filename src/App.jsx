@@ -909,6 +909,8 @@ const DataProvider = ({ children }) => {
       ownerId: user.uid,
       isGroup: true,
       groupName,
+      groupAvatar: '',
+      description: '',
       inviteCode,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
@@ -928,6 +930,8 @@ const DataProvider = ({ children }) => {
         ownerId: user.uid,
         isGroup: true,
         groupName,
+        groupAvatar: '',
+        description: '',
         inviteCode,
         messages: []
       }
@@ -1002,19 +1006,38 @@ const DataProvider = ({ children }) => {
     });
   };
 
-  const renameGroup = async (chatId, name) => {
+  const updateGroupProfile = async (chatId, { name, description, avatarFile, removeAvatar }) => {
     const groupName = name.trim();
+    const groupDescription = description.trim();
     const chat = chats.find(item => item.id === chatId);
     if (!chat?.isGroup || !chat.groupAdmins?.includes(user?.uid)) {
-      throw new Error('Only group admins can rename this group.');
+      throw new Error('Only group admins can update this group profile.');
     }
     if (groupName.length < 2 || groupName.length > 60) {
       throw new Error('Group name must be between 2 and 60 characters.');
     }
-    await updateDoc(doc(db, 'chats', chatId), {
+    if (groupDescription.length > 500) {
+      throw new Error('Group description must be 500 characters or fewer.');
+    }
+    const updates = {
       groupName,
+      description: groupDescription,
       updatedAt: serverTimestamp()
-    });
+    };
+    if (removeAvatar) updates.groupAvatar = '';
+    if (avatarFile) {
+      if (!avatarFile.type.startsWith('image/')) throw new Error('Choose an image for the group photo.');
+      if (avatarFile.size <= 0 || avatarFile.size > 5 * 1024 * 1024) {
+        throw new Error('Group photos must be 5 MB or smaller.');
+      }
+      const uploadedImage = await uploadToCloudinary(avatarFile, {
+        chatId,
+        type: 'image',
+        purpose: 'group'
+      });
+      updates.groupAvatar = uploadedImage.secureUrl;
+    }
+    await updateDoc(doc(db, 'chats', chatId), updates);
   };
 
   const rotateGroupInvite = async (chatId) => {
@@ -1272,7 +1295,7 @@ const DataProvider = ({ children }) => {
     <DataContext.Provider value={{
       chats, users, stories, friendIds, friendRequests, moments, savedMessages, activeCall, toastMessage,
       createChat, createGroup, joinGroup, addGroupMembers, removeGroupMember,
-      promoteGroupAdmin, renameGroup, rotateGroupInvite, leaveGroup,
+      promoteGroupAdmin, updateGroupProfile, rotateGroupInvite, leaveGroup,
       sendMessage, sendAttachment, editMessage, deleteMessage, hideConversation,
       hideMessageForMe,
       addReaction, forwardMessage, toggleSaveMessage, votePoll,
@@ -1690,7 +1713,9 @@ const DashboardView = () => {
                   className="flex items-center p-3.5 hover:bg-slate-50 dark:hover:bg-slate-900/60 rounded-2xl cursor-pointer transition-colors"
                 >
                   {isGroup ? (
-                    <img src={chat.groupAvatar} className="w-12 h-12 rounded-full object-cover shrink-0" alt="Group" />
+                    chat.groupAvatar
+                      ? <img src={chat.groupAvatar} className="w-12 h-12 rounded-full object-cover shrink-0" alt="Group" />
+                      : <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-300"><Users size={20} /></div>
                   ) : (
                     <Avatar src={otherUser?.avatar} isOnline={otherUser?.isOnline} vibe={otherUser?.vibe} />
                   )}
@@ -1733,7 +1758,7 @@ const DashboardView = () => {
 const ChatView = () => {
   const {
     chats, users, createChat, createGroup, joinGroup, addGroupMembers,
-    removeGroupMember, promoteGroupAdmin, renameGroup, rotateGroupInvite, leaveGroup,
+    removeGroupMember, promoteGroupAdmin, updateGroupProfile, rotateGroupInvite, leaveGroup,
     sendMessage, sendAttachment, editMessage,
     deleteMessage, hideMessageForMe, hideConversation, addReaction, forwardMessage,
     toggleSaveMessage, votePoll,
@@ -2141,9 +2166,9 @@ const ChatView = () => {
                   <ChevronLeft size={22} />
                 </button>
                 {isGroup ? (
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white">
-                    <Users size={19} />
-                  </div>
+                  activeChat.groupAvatar
+                    ? <img src={activeChat.groupAvatar} alt="Group" className="h-10 w-10 rounded-full object-cover" />
+                    : <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white"><Users size={19} /></div>
                 ) : (
                   <Avatar src={otherUser?.avatar} size="sm" isOnline={otherUser?.isOnline} />
                 )}
@@ -2611,7 +2636,7 @@ const ChatView = () => {
           currentUser={user}
           isPending={isGroupActionPending}
           onClose={() => setShowGroupManagement(false)}
-          onRename={renameGroup}
+          onUpdateGroupProfile={updateGroupProfile}
           onAddMembers={addGroupMembers}
           onRemoveMember={removeGroupMember}
           onPromoteAdmin={promoteGroupAdmin}
@@ -2636,7 +2661,7 @@ const GroupManagementDialog = ({
   currentUser,
   isPending,
   onClose,
-  onRename,
+  onUpdateGroupProfile,
   onAddMembers,
   onRemoveMember,
   onPromoteAdmin,
@@ -2647,8 +2672,15 @@ const GroupManagementDialog = ({
   onPending
 }) => {
   const [name, setName] = useState(group.groupName || '');
+  const [description, setDescription] = useState(group.description || '');
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [removeAvatar, setRemoveAvatar] = useState(false);
   const [selectedMembers, setSelectedMembers] = useState([]);
   const [rotatedInviteCode, setRotatedInviteCode] = useState(null);
+  const avatarPreview = useMemo(
+    () => avatarFile ? URL.createObjectURL(avatarFile) : '',
+    [avatarFile]
+  );
   const isAdmin = group.groupAdmins?.includes(currentUser.uid);
   const inviteCode = rotatedInviteCode ?? group.inviteCode ?? '';
   const inviteLink = inviteCode
@@ -2660,6 +2692,12 @@ const GroupManagementDialog = ({
       ? currentUser
       : users.find(profile => profile.id === uid) || {})
   }));
+
+  useEffect(() => {
+    return () => {
+      if (avatarPreview) URL.revokeObjectURL(avatarPreview);
+    };
+  }, [avatarPreview]);
 
   const runGroupAction = async (action, successMessage) => {
     onPending(true);
@@ -2700,18 +2738,88 @@ const GroupManagementDialog = ({
             <form
               onSubmit={event => {
                 event.preventDefault();
-                runGroupAction(() => onRename(group.id, name), 'Group name updated.');
+                runGroupAction(async () => {
+                  await onUpdateGroupProfile(group.id, { name, description, avatarFile, removeAvatar });
+                  setAvatarFile(null);
+                  setRemoveAvatar(false);
+                }, 'Group profile updated.');
               }}
-              className="mb-5 flex gap-2"
+              className="mb-5 space-y-3"
             >
+              <div className="flex items-center gap-3">
+                {avatarPreview || (removeAvatar ? '' : group.groupAvatar)
+                  ? <img src={avatarPreview || group.groupAvatar} alt="Group profile" className="h-14 w-14 rounded-2xl bg-slate-100 object-cover dark:bg-slate-800" />
+                  : <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-300"><Users size={22} /></div>}
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900">
+                  <Camera size={15} />
+                  Change group photo
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={event => {
+                      const file = event.target.files?.[0];
+                      event.target.value = '';
+                      if (!file) return;
+                      if (!file.type.startsWith('image/')) {
+                        onError(new Error('Choose an image for the group photo.'));
+                      } else if (file.size > 5 * 1024 * 1024) {
+                        onError(new Error('Group photos must be 5 MB or smaller.'));
+                      } else {
+                        setAvatarFile(file);
+                        setRemoveAvatar(false);
+                      }
+                    }}
+                  />
+                </label>
+                {avatarFile && (
+                  <button type="button" onClick={() => setAvatarFile(null)} className="text-xs font-semibold text-rose-600 hover:underline">
+                    Remove selection
+                  </button>
+                )}
+                {!avatarFile && group.groupAvatar && !removeAvatar && (
+                  <button type="button" onClick={() => setRemoveAvatar(true)} className="text-xs font-semibold text-rose-600 hover:underline">
+                    Remove photo
+                  </button>
+                )}
+                {removeAvatar && (
+                  <button type="button" onClick={() => setRemoveAvatar(false)} className="text-xs font-semibold text-slate-500 hover:underline">
+                    Undo
+                  </button>
+                )}
+              </div>
               <input
                 value={name}
                 maxLength={60}
+                minLength={2}
+                required
                 onChange={event => setName(event.target.value)}
                 aria-label="Group name"
-                className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                placeholder="Group name"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
               />
-              <button type="submit" disabled={isPending || name.trim() === group.groupName} className="rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">Save</button>
+              <textarea
+                value={description}
+                maxLength={500}
+                rows={3}
+                onChange={event => setDescription(event.target.value)}
+                aria-label="Group description"
+                placeholder="What is this group about?"
+                className="w-full resize-y rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+              />
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] text-slate-400">{description.length}/500 characters</span>
+                <button
+                  type="submit"
+                  disabled={isPending || (name.trim() === group.groupName
+                    && description.trim() === (group.description || '')
+                    && !avatarFile
+                    && !removeAvatar)}
+                  className="rounded-xl bg-violet-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {isPending ? 'Saving…' : 'Save profile'}
+                </button>
+              </div>
             </form>
 
             <div className="mb-5 space-y-2">
@@ -2765,8 +2873,10 @@ const GroupManagementDialog = ({
             </form>
           </>
         ) : (
-          <div className="mb-5 rounded-xl bg-slate-50 p-3 text-sm text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-            Group name and invite settings can be managed by group admins.
+          <div className="mb-5 space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-900">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white">{group.groupName}</h3>
+            <p className="whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300">{group.description || 'No group description yet.'}</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">Group profile and invite settings are managed by group admins.</p>
           </div>
         )}
 

@@ -223,7 +223,7 @@ service cloud.firestore {
           || (
             request.resource.data.keys().hasOnly([
               'participants', 'groupAdmins', 'ownerId', 'isGroup', 'groupName',
-              'inviteCode', 'createdAt', 'updatedAt'
+              'groupAvatar', 'description', 'inviteCode', 'createdAt', 'updatedAt'
             ])
             && request.resource.data.isGroup == true
             && request.resource.data.participants.size() == 1
@@ -232,6 +232,10 @@ service cloud.firestore {
             && request.resource.data.groupName is string
             && request.resource.data.groupName.size() >= 2
             && request.resource.data.groupName.size() <= 60
+            && request.resource.data.get('groupAvatar', '') is string
+            && request.resource.data.get('groupAvatar', '').size() <= 2000
+            && request.resource.data.get('description', '') is string
+            && request.resource.data.get('description', '').size() <= 500
             && request.resource.data.inviteCode is string
             && getAfter(
               /databases/$(database)/documents/groupInvites/$(request.resource.data.inviteCode)
@@ -327,11 +331,15 @@ service cloud.firestore {
           || (
             isGroupAdmin(chatId)
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-              'groupName', 'updatedAt'
+              'groupName', 'groupAvatar', 'description', 'updatedAt'
             ])
             && request.resource.data.groupName is string
             && request.resource.data.groupName.size() >= 2
             && request.resource.data.groupName.size() <= 60
+            && request.resource.data.get('groupAvatar', '') is string
+            && request.resource.data.get('groupAvatar', '').size() <= 2000
+            && request.resource.data.get('description', '') is string
+            && request.resource.data.get('description', '').size() <= 500
             && request.resource.data.updatedAt == request.time
           )
           || (

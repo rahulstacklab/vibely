@@ -86,9 +86,10 @@ const server = createServer(async (request, response) => {
     const purpose = body.purpose || 'chat';
     if (
       !['image', 'video', 'document', 'voice'].includes(type) ||
-      !['chat', 'profile', 'moment'].includes(purpose) ||
+      !['chat', 'profile', 'moment', 'group'].includes(purpose) ||
       (purpose !== 'chat' && type !== 'image') ||
-      (purpose === 'chat' && (!safeId.test(chatId || '') || !safeId.test(messageId || ''))) ||
+      ((purpose === 'chat' || purpose === 'group') && !safeId.test(chatId || '')) ||
+      (purpose === 'chat' && !safeId.test(messageId || '')) ||
       typeof fileName !== 'string' ||
       !fileName.trim()
     ) {
@@ -96,7 +97,7 @@ const server = createServer(async (request, response) => {
       return;
     }
 
-    if (purpose === 'chat') {
+    if (purpose === 'chat' || purpose === 'group') {
       const chatResponse = await fetch(
       `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT_ID}/databases/(default)/documents/chats/${encodeURIComponent(chatId)}`,
       { headers: { Authorization: `Bearer ${token}` } }
@@ -115,6 +116,14 @@ const server = createServer(async (request, response) => {
       response.writeHead(403).end(JSON.stringify({ error: 'You are not a member of this conversation.' }));
       return;
     }
+    if (purpose === 'group') {
+      const groupAdmins = chatDocument.fields?.groupAdmins?.arrayValue?.values || [];
+      if (chatDocument.fields?.isGroup?.booleanValue !== true
+        || !groupAdmins.some(admin => admin.stringValue === uid)) {
+        response.writeHead(403).end(JSON.stringify({ error: 'Only group admins can update the group photo.' }));
+        return;
+      }
+    }
     }
 
     const resourceType = type === 'image' ? 'image'
@@ -127,7 +136,9 @@ const server = createServer(async (request, response) => {
       .slice(0, 80) || 'attachment';
     const folder = purpose === 'chat'
       ? `vibely/chats/${chatId}/${uid}`
-      : `vibely/${purpose === 'profile' ? 'profiles' : 'moments'}/${uid}`;
+      : purpose === 'group'
+        ? `vibely/groups/${chatId}/${uid}`
+        : `vibely/${purpose === 'profile' ? 'profiles' : 'moments'}/${uid}`;
     const timestamp = Math.floor(Date.now() / 1000).toString();
     const publicId = purpose === 'chat'
       ? `${messageId}-${baseName}`
