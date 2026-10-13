@@ -1818,6 +1818,15 @@ const ChatView = () => {
   }, [activeChat?.messages]);
 
   useEffect(() => {
+    if (!reactionPickerMessageId) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setReactionPickerMessageId(null);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [reactionPickerMessageId]);
+
+  useEffect(() => {
     if (!activeChat || !user?.uid) return undefined;
 
     let isActive = true;
@@ -2405,27 +2414,33 @@ const ChatView = () => {
                       </div>
 
                       {/* Action icons on hover */}
-                      <div className="flex flex-wrap items-center gap-2 px-1">
+                      <div className={`flex flex-wrap items-center gap-1 px-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
                         <div className="relative">
                           <button
                             type="button"
                             title="React to message"
                             aria-label="React to message"
                             aria-expanded={reactionPickerMessageId === msg.id}
+                            aria-controls={`reaction-picker-${msg.id}`}
                             onClick={() => setReactionPickerMessageId(current => current === msg.id ? null : msg.id)}
-                            className="text-sm text-slate-400 transition-colors hover:text-violet-500"
+                            className="flex h-9 min-w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-violet-50 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 dark:text-slate-400 dark:hover:bg-violet-950 dark:hover:text-violet-300"
                           >
                             <Smile size={16} />
                           </button>
                           {reactionPickerMessageId === msg.id && (
-                            <div className="absolute bottom-full left-0 z-20 mb-2 grid grid-cols-4 gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                            <div
+                              id={`reaction-picker-${msg.id}`}
+                              role="group"
+                              aria-label="Choose a message reaction"
+                              className={`absolute bottom-full z-30 mb-2 grid w-max max-w-[calc(100vw-2rem)] grid-cols-4 gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900 ${isMe ? 'right-0' : 'left-0'}`}
+                            >
                               {MESSAGE_REACTIONS.map(emoji => (
                                 <button
                                   key={emoji}
                                   type="button"
                                   onClick={() => handleReaction(msg.id, emoji)}
                                   aria-label={`React with ${emoji}`}
-                                  className="rounded-lg p-2 text-xl transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
+                                  className="flex h-10 w-10 items-center justify-center rounded-lg text-xl transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 dark:hover:bg-slate-800"
                                 >
                                   {emoji}
                                 </button>
@@ -2438,20 +2453,27 @@ const ChatView = () => {
                           title="Forward message"
                           aria-label="Forward message"
                           onClick={() => setForwardingMessage(msg)}
-                          className="text-xs text-slate-400 transition-colors hover:text-violet-500"
+                          className="flex h-9 min-w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-violet-50 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 dark:text-slate-400 dark:hover:bg-violet-950 dark:hover:text-violet-300"
                         >
                           <Send size={14} />
                         </button>
-                        <button onClick={() => toggleSaveMessage(msg)} className="text-xs text-slate-400 hover:text-amber-400">⭐</button>
+                        <button
+                          type="button"
+                          title="Save message"
+                          aria-label="Save message"
+                          onClick={() => toggleSaveMessage(msg)}
+                          className="flex h-9 min-w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-amber-50 hover:text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 dark:text-slate-400 dark:hover:bg-amber-950"
+                        >⭐</button>
                         {isMe && msg.type === 'text' && editingMessageId !== msg.id && (
                           <button
                             type="button"
                             title="Edit message"
+                            aria-label="Edit message"
                             onClick={() => {
                               setEditingMessageId(msg.id);
                               setEditingText(msg.text);
                             }}
-                            className="text-slate-400 hover:text-violet-500"
+                            className="flex h-9 min-w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-violet-50 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 dark:text-slate-400 dark:hover:bg-violet-950"
                           >
                             <Pencil size={14} />
                           </button>
@@ -2463,7 +2485,7 @@ const ChatView = () => {
                             aria-label="Delete message"
                             aria-expanded={deleteOptionsMessageId === msg.id}
                             onClick={() => setDeleteOptionsMessageId(current => current === msg.id ? null : msg.id)}
-                            className="text-slate-400 hover:text-rose-500"
+                            className="flex h-9 min-w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:text-slate-400 dark:hover:bg-rose-950"
                           >
                             <Trash2 size={14} />
                           </button>
