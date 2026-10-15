@@ -714,7 +714,11 @@ const DataProvider = ({ children }) => {
                   id: messageDoc.id,
                   ...message,
                   timestamp: message.createdAt?.toDate
-                    ? message.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    ? message.createdAt.toDate().toLocaleTimeString([], {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      hour12: true
+                    })
                     : ''
                 };
               })
@@ -2369,7 +2373,7 @@ const ChatView = () => {
 
                 return (
                   <div key={msg.id} className={`group flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    <div className="max-w-[88%] space-y-1 sm:max-w-[75%]">
+                    <div className={`chat-message-content space-y-1 ${isMe ? 'ml-auto' : 'mr-auto'}`}>
                       
                       {/* Bubble */}
                       <div className={`relative rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed shadow-[0_1px_1px_rgba(11,20,26,0.12)] [overflow-wrap:anywhere] ${isMe ? 'chat-message-outgoing rounded-br-md' : 'chat-message-incoming rounded-bl-md border border-black/[0.04] dark:border-white/[0.04]'}`}>
@@ -2483,7 +2487,7 @@ const ChatView = () => {
                             </div>
                           </div>
                         ) : (
-                          <p>{msg.text}</p>
+                          <p className="whitespace-pre-wrap">{msg.text}</p>
                         )}
 
                         {/* Translation Toggle */}
@@ -2504,9 +2508,9 @@ const ChatView = () => {
                           </div>
                         )}
 
-                        <div className="flex items-center justify-end space-x-1.5 mt-1">
-                          <span className="text-[10px] opacity-70">{msg.timestamp}</span>
-                          {msg.editedAt && <span className="text-[10px] opacity-70">· edited</span>}
+                        <div className="chat-message-meta">
+                          {msg.editedAt && <span className="opacity-80">Edited</span>}
+                          <time className="opacity-80">{msg.timestamp}</time>
                           {isMe && (
                             <CheckCheck
                               size={14}
@@ -2514,7 +2518,7 @@ const ChatView = () => {
                               title={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
                               className={msg.readBy?.some(uid => uid !== user.id)
                                 ? 'text-sky-300'
-                                : isMe ? 'text-slate-500/80 dark:text-white/60' : 'text-slate-400'}
+                                : 'text-slate-500/80 dark:text-white/60'}
                             />
                           )}
                         </div>

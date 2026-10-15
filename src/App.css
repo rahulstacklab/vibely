@@ -276,6 +276,35 @@
   background-size: 26px 26px, 34px 34px;
 }
 
+.chat-message-content {
+  width: fit-content;
+  max-width: min(88%, 42rem);
+  min-width: 0;
+}
+
+@media (min-width: 640px) {
+  .chat-message-content {
+    max-width: min(75%, 42rem);
+  }
+}
+
+.chat-message-meta {
+  display: flex;
+  min-height: 15px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--chat-text-color);
+}
+
+.chat-message-meta time {
+  white-space: nowrap;
+}
+
 .chat-message-outgoing {
   background-color: var(--chat-outgoing-color);
   color: var(--chat-text-color);
