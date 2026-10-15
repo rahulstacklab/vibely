@@ -276,6 +276,40 @@
   background-size: 26px 26px, 34px 34px;
 }
 
+.chat-date-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  min-height: 30px;
+  margin-bottom: 6px;
+  pointer-events: none;
+}
+
+.chat-date-sticky time {
+  max-width: calc(100% - 16px);
+  align-self: flex-start;
+  border: 1px solid rgb(255 255 255 / 90%);
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 96%);
+  padding: 5px 12px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgb(15 23 42 / 14%);
+}
+
+.dark .chat-date-sticky time {
+  border-color: rgb(71 85 105 / 90%);
+  background: rgb(30 41 59 / 96%);
+  color: #e2e8f0;
+}
+
 .chat-message-content {
   width: fit-content;
   max-width: min(88%, 42rem);
@@ -313,6 +347,18 @@
 .chat-message-incoming {
   background-color: var(--chat-surface-color);
   color: var(--chat-text-color);
+}
+
+.chat-message-highlighted {
+  background: linear-gradient(135deg, #fff2a8, #ffd166);
+  color: #422006;
+  box-shadow: 0 0 0 2px rgb(245 158 11 / 55%), 0 5px 16px rgb(180 83 9 / 16%);
+}
+
+.dark .chat-message-highlighted {
+  background: linear-gradient(135deg, #59410d, #704b12);
+  color: #fff4c2;
+  box-shadow: 0 0 0 2px rgb(251 191 36 / 55%), 0 5px 16px rgb(0 0 0 / 24%);
 }
 
 .chat-theme-composer {

@@ -1,5 +1,5 @@
 /* eslint-disable no-unused-vars */
-import { useState, useEffect, useContext, createContext, useRef, useCallback, useMemo } from 'react';
+import { Fragment, useState, useEffect, useContext, createContext, useRef, useCallback, useMemo } from 'react';
 import {
   browserLocalPersistence,
   createUserWithEmailAndPassword,
@@ -40,7 +40,7 @@ import {
   Mic, Send, Smile, Paperclip, MoreVertical, Phone, Video, Link2,
   CheckCheck, Sun, Moon, LogOut, Bell, ChevronLeft, Heart,
   Activity, X, Lock, Flame,
-  Sparkles, Filter, Globe, Sliders, Bookmark,
+  Sparkles, Filter, Globe, Sliders, Bookmark, Highlighter,
   ShieldAlert, PhoneOff, MicOff, VideoOff, FileText, StopCircle, Pencil, Trash2, Camera, Save
 } from 'lucide-react';
 
@@ -196,6 +196,26 @@ const RouterContext = createContext();
 const DataContext = createContext();
 let localAuthPersistencePromise;
 const MESSAGE_REACTIONS = ['❤️', '😂', '😮', '😢', '🙏', '👍', '🔥', '🎉'];
+const getMessageDate = (createdAt) => {
+  const date = typeof createdAt?.toDate === 'function'
+    ? createdAt.toDate()
+    : createdAt instanceof Date
+      ? createdAt
+      : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+};
+const getMessageDateLabel = (date) => {
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return 'Today';
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric'
+  }).format(date);
+};
 const ATTACHMENT_MIME_TYPES = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
@@ -1847,6 +1867,7 @@ const ChatView = () => {
   const activeChatId = routeParams.chatId || null;
   const [inputText, setInputText] = useState('');
   const [showTranslation, setShowTranslation] = useState({});
+  const [currentChatDate, setCurrentChatDate] = useState('');
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editingText, setEditingText] = useState('');
   const [deleteOptionsMessageId, setDeleteOptionsMessageId] = useState(null);
@@ -1867,6 +1888,17 @@ const ChatView = () => {
       return {};
     }
   });
+  const [highlightedMessages, setHighlightedMessages] = useState(() => {
+    try {
+      const storedHighlights = JSON.parse(window.localStorage.getItem(`vibely_highlighted_messages_${user.uid}`) || '[]');
+      return Array.isArray(storedHighlights)
+        ? storedHighlights.filter(messageKey => typeof messageKey === 'string')
+        : [];
+    } catch (error) {
+      console.error('Unable to load highlighted messages.', error);
+      return [];
+    }
+  });
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showJoinGroup, setShowJoinGroup] = useState(false);
   const [showGroupManagement, setShowGroupManagement] = useState(false);
@@ -1876,6 +1908,7 @@ const ChatView = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const messagesEndRef = useRef(null);
+  const messageListRef = useRef(null);
   const fileInputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordingStartedAtRef = useRef(0);
@@ -1883,6 +1916,11 @@ const ChatView = () => {
   const activeChat = chats.find(c => c.id === activeChatId);
   const isGroup = activeChat?.isGroup;
   const activeTheme = chatThemes[activeChatId] || 'amethyst';
+  const latestChatDate = [...(activeChat?.messages || [])]
+    .reverse()
+    .map(message => getMessageDate(message.createdAt))
+    .find(Boolean);
+  const displayedChatDate = currentChatDate || (latestChatDate ? getMessageDateLabel(latestChatDate) : '');
   const visibleChats = chats.filter(chat => Boolean(chat.isGroup) === isGroupsRoute);
   const otherUser = !isGroup ? users.find(u => activeChat?.participants.includes(u.id) && u.id !== user.id) : null;
 
@@ -1900,9 +1938,60 @@ const ChatView = () => {
     }
   };
 
+  const handleMessageHighlight = (messageKey) => {
+    const nextHighlights = highlightedMessages.includes(messageKey)
+      ? highlightedMessages.filter(key => key !== messageKey)
+      : [...highlightedMessages, messageKey];
+    try {
+      window.localStorage.setItem(
+        `vibely_highlighted_messages_${user.uid}`,
+        JSON.stringify(nextHighlights)
+      );
+      setHighlightedMessages(nextHighlights);
+    } catch (error) {
+      console.error('Unable to save highlighted messages.', error);
+      showToast(`Couldn't update message highlight: ${error.message}`);
+    }
+  };
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeChat?.messages]);
+
+  useEffect(() => {
+    const messageList = messageListRef.current;
+    if (!messageList) return undefined;
+
+    const updateCurrentDate = () => {
+      const datedMessages = [...messageList.querySelectorAll('[data-chat-date]')];
+      if (datedMessages.length === 0) {
+        setCurrentChatDate('');
+        return;
+      }
+
+      const threshold = messageList.getBoundingClientRect().top + 40;
+      let currentMessage = datedMessages[0];
+      datedMessages.some(message => {
+        if (message.getBoundingClientRect().top > threshold) return true;
+        currentMessage = message;
+        return false;
+      });
+      setCurrentChatDate(currentMessage.dataset.chatDate || '');
+    };
+
+    let frameId = window.requestAnimationFrame(updateCurrentDate);
+    const onScroll = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateCurrentDate);
+    };
+    messageList.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', onScroll);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      messageList.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [activeChatId, activeChat?.messages]);
 
   useEffect(() => {
     if (!reactionPickerMessageId) return undefined;
@@ -2356,27 +2445,33 @@ const ChatView = () => {
             </div>
 
             {/* Messages Scroll Area */}
-            <div className="chat-wallpaper min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-6 sm:py-6">
+            <div ref={messageListRef} className="chat-wallpaper min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-6 sm:py-6">
+              {displayedChatDate && (
+                <div className="chat-date-sticky" aria-live="polite">
+                  <time>{displayedChatDate}</time>
+                </div>
+              )}
               <div className="mx-auto max-w-5xl space-y-3.5">
-              <div className="flex justify-center py-1">
-                <span className="rounded-lg border border-black/5 bg-[#fef7e8]/95 px-3 py-1.5 text-center text-[11px] font-medium text-slate-600 shadow-sm dark:border-white/5 dark:bg-[#182229]/95 dark:text-slate-300">
-                  Live messages • Your conversation is saved to your account
-                </span>
-              </div>
-
               {activeChat.messages.map((msg) => {
+                const messageDate = getMessageDate(msg.createdAt);
                 const isMe = msg.senderId === user.id;
+                const messageKey = `${activeChat.id}:${msg.id}`;
+                const isHighlighted = highlightedMessages.includes(messageKey);
                 const reactionCounts = Object.values(msg.reactions || {}).reduce((counts, emoji) => ({
                   ...counts,
                   [emoji]: (counts[emoji] || 0) + 1
                 }), {});
 
                 return (
-                  <div key={msg.id} className={`group flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`chat-message-content space-y-1 ${isMe ? 'ml-auto' : 'mr-auto'}`}>
+                  <Fragment key={msg.id}>
+                    <div
+                      className={`group flex ${isMe ? 'justify-end' : 'justify-start'}`}
+                      data-chat-date={messageDate ? getMessageDateLabel(messageDate) : undefined}
+                    >
+                      <div className={`chat-message-content space-y-1 ${isMe ? 'ml-auto' : 'mr-auto'}`}>
                       
                       {/* Bubble */}
-                      <div className={`relative rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed shadow-[0_1px_1px_rgba(11,20,26,0.12)] [overflow-wrap:anywhere] ${isMe ? 'chat-message-outgoing rounded-br-md' : 'chat-message-incoming rounded-bl-md border border-black/[0.04] dark:border-white/[0.04]'}`}>
+                      <div className={`relative rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed shadow-[0_1px_1px_rgba(11,20,26,0.12)] [overflow-wrap:anywhere] ${isMe ? 'chat-message-outgoing rounded-br-md' : 'chat-message-incoming rounded-bl-md border border-black/[0.04] dark:border-white/[0.04]'} ${isHighlighted ? 'chat-message-highlighted' : ''}`}>
                         
                         {isGroup && !isMe && (
                           <p className="mb-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
@@ -2441,7 +2536,7 @@ const ChatView = () => {
                           >
                             <FileText size={24} className="shrink-0" />
                             <span className="min-w-0">
-                              <span className="block truncate font-semibold">{msg.fileName || msg.text}</span>
+                              <span className="block font-semibold">Document</span>
                               <span className="text-xs opacity-75">{(msg.fileSize / (1024 * 1024)).toFixed(2)} MB · Open file</span>
                             </span>
                           </a>
@@ -2575,6 +2670,16 @@ const ChatView = () => {
                           onClick={() => toggleSaveMessage(msg)}
                           className="flex h-9 min-w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-amber-50 hover:text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 dark:text-slate-400 dark:hover:bg-amber-950"
                         >⭐</button>
+                        <button
+                          type="button"
+                          title={isHighlighted ? 'Remove message highlight' : 'Highlight message'}
+                          aria-label={isHighlighted ? 'Remove message highlight' : 'Highlight message'}
+                          aria-pressed={isHighlighted}
+                          onClick={() => handleMessageHighlight(messageKey)}
+                          className={`flex h-9 min-w-9 items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${isHighlighted ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300' : 'text-slate-500 hover:bg-amber-50 hover:text-amber-600 dark:text-slate-400 dark:hover:bg-amber-950'}`}
+                        >
+                          <Highlighter size={16} />
+                        </button>
                         {isMe && msg.type === 'text' && editingMessageId !== msg.id && (
                           <button
                             type="button"
@@ -2649,8 +2754,9 @@ const ChatView = () => {
                         </div>
                       )}
 
+                      </div>
                     </div>
-                  </div>
+                  </Fragment>
                 );
               })}
               <div ref={messagesEndRef} />
