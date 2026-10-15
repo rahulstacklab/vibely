@@ -1,5 +1,5 @@
 import { useState, useContext } from 'react';
-import { Home, MessageCircle, Users, User, Settings, Shield, MoreVertical, Sun, Moon, LogOut, Activity, Sparkles, Globe, Bookmark } from 'lucide-react';
+import { Home, MessageCircle, Users, User, Settings, Shield, MoreVertical, Sun, Moon, LogOut, Sparkles, Globe, Bookmark } from 'lucide-react';
 import { ThemeContext, AuthContext, RouterContext, DataContext } from '../app/contexts.js';
 import { Avatar } from './SharedComponents.jsx';
 
@@ -34,8 +34,9 @@ export const Sidebar = () => {
   return (
     <aside className="fixed inset-y-0 left-0 hidden md:flex w-16 flex-col h-screen bg-white dark:bg-slate-950 border-r border-slate-200/80 dark:border-slate-800/80 z-50 overflow-visible">
       <div className="group/home relative p-3 flex items-center justify-center my-2 cursor-pointer" onClick={() => navigate('/')} tabIndex={0} role="button" aria-label="Vibely home">
-        <div className="w-10 h-10 bg-gradient-to-tr from-violet-600 via-fuchsia-500 to-amber-400 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-500/25 transition-transform hover:scale-105">
-          <Activity className="text-white" size={22} />
+        <div className="flex h-10 w-10 items-center justify-center transition-transform hover:scale-105">
+          <img src="/vibely-mark-light.png" alt="" aria-hidden="true" className="h-full w-full object-contain dark:hidden" />
+          <img src="/vibely-mark-dark.png" alt="" aria-hidden="true" className="hidden h-full w-full object-contain dark:block" />
         </div>
         <span className="pointer-events-none invisible absolute left-full top-1/2 z-[60] ml-3 -translate-y-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white opacity-0 shadow-lg transition-opacity group-hover/home:visible group-hover/home:opacity-100 group-focus-visible/home:visible group-focus-visible/home:opacity-100 dark:bg-slate-700">
           Vibely home
@@ -213,4 +214,3 @@ export const BottomNav = () => {
 };
 
 export const CompassIcon = ({ size, className }) => <Globe size={size} className={className} />;
-
