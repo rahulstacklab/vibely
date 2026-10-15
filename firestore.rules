@@ -416,7 +416,7 @@ service cloud.firestore {
             'senderId', 'text', 'type', 'createdAt',
               'attachmentUrl', 'cloudinaryPublicId', 'cloudinaryResourceType',
               'fileName', 'mimeType', 'fileSize', 'duration', 'forwardedFrom', 'readBy',
-              'attachments'
+            'attachments', 'replyTo'
           ])
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.readBy is list
@@ -430,6 +430,20 @@ service cloud.firestore {
             || (
               request.resource.data.forwardedFrom is string
               && request.resource.data.forwardedFrom.size() <= 120
+            )
+          )
+          && (
+            !request.resource.data.keys().hasAny(['replyTo'])
+            || (
+              request.resource.data.replyTo is map
+              && request.resource.data.replyTo.keys().hasOnly(['messageId', 'senderId', 'text'])
+              && request.resource.data.replyTo.messageId is string
+              && request.resource.data.replyTo.messageId.size() <= 128
+              && request.resource.data.replyTo.senderId in get(
+                /databases/$(database)/documents/chats/$(chatId)
+              ).data.participants
+              && request.resource.data.replyTo.text is string
+              && request.resource.data.replyTo.text.size() <= 4000
             )
           )
           && (
@@ -447,7 +461,7 @@ service cloud.firestore {
           && (
             request.resource.data.type == 'text'
             && request.resource.data.keys().hasOnly([
-              'senderId', 'text', 'type', 'createdAt', 'forwardedFrom', 'readBy'
+              'senderId', 'text', 'type', 'createdAt', 'forwardedFrom', 'readBy', 'replyTo'
             ])
             ||
             request.resource.data.type in ['image', 'video', 'document', 'voice']

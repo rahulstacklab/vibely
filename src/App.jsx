@@ -38,7 +38,7 @@ import { uploadToCloudinary } from './services/uploadService.js';
 import {
   Home, MessageCircle, Users, User, Settings, Shield, Search, Plus, Copy, UserPlus, Crown,
   Mic, Send, Smile, Paperclip, MoreVertical, Phone, Video, Link2,
-  CheckCheck, Sun, Moon, LogOut, Bell, ChevronLeft, Heart,
+  CheckCheck, Sun, Moon, LogOut, Bell, ChevronLeft, ChevronDown, Heart,
   Activity, X, Lock, Flame,
   Sparkles, Filter, Globe, Sliders, Bookmark, Highlighter,
   ShieldAlert, PhoneOff, MicOff, VideoOff, FileText, StopCircle, Pencil, Trash2, Camera, Save
@@ -1142,20 +1142,22 @@ const DataProvider = ({ children }) => {
     await batch.commit();
   };
 
-  const sendMessage = async (chatId, text) => {
+  const sendMessage = async (chatId, text, replyTo = null) => {
     const cleanText = text.trim();
     if (!cleanText || !user?.uid) return;
 
     const chatRef = doc(db, 'chats', chatId);
     const messageRef = doc(collection(db, 'chats', chatId, 'messages'));
     const batch = writeBatch(db);
-    batch.set(messageRef, {
+    const messageData = {
       senderId: user.uid,
       text: cleanText,
       type: 'text',
       readBy: [user.uid],
       createdAt: serverTimestamp()
-    });
+    };
+    if (replyTo) messageData.replyTo = replyTo;
+    batch.set(messageRef, messageData);
     batch.set(chatRef, {
       lastMessage: cleanText,
       updatedAt: serverTimestamp()
@@ -1898,7 +1900,9 @@ const ChatView = () => {
   const isGroupsRoute = currentRoute === '/groups';
   const activeChatId = routeParams.chatId || null;
   const [inputText, setInputText] = useState('');
+  const [replyingToMessage, setReplyingToMessage] = useState(null);
   const [showTranslation, setShowTranslation] = useState({});
+  const [openMessageMenuId, setOpenMessageMenuId] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editingText, setEditingText] = useState('');
   const [deleteOptionsMessageId, setDeleteOptionsMessageId] = useState(null);
@@ -1940,6 +1944,7 @@ const ChatView = () => {
   const [isRecording, setIsRecording] = useState(false);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const messageInputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordingStartedAtRef = useRef(0);
 
@@ -1993,6 +1998,26 @@ const ChatView = () => {
   }, [reactionPickerMessageId]);
 
   useEffect(() => {
+    if (!openMessageMenuId) return undefined;
+    const closeMenu = (event) => {
+      if (event.type === 'keydown' && event.key === 'Escape') {
+        setOpenMessageMenuId(null);
+        return;
+      }
+      if (event.type === 'pointerdown' &&
+        event.target.closest('[data-message-actions]')?.dataset.messageActions !== openMessageMenuId) {
+        setOpenMessageMenuId(null);
+      }
+    };
+    document.addEventListener('pointerdown', closeMenu);
+    window.addEventListener('keydown', closeMenu);
+    return () => {
+      document.removeEventListener('pointerdown', closeMenu);
+      window.removeEventListener('keydown', closeMenu);
+    };
+  }, [openMessageMenuId]);
+
+  useEffect(() => {
     if (!activeChat || !user?.uid) return undefined;
 
     let isActive = true;
@@ -2030,12 +2055,33 @@ const ChatView = () => {
     e.preventDefault();
     if (!inputText.trim()) return;
     if (!activeChat) return;
-    sendMessage(activeChat.id, inputText)
-      .then(() => setInputText(''))
+    const replyTo = replyingToMessage
+      ? {
+        messageId: replyingToMessage.id,
+        senderId: replyingToMessage.senderId,
+        text: replyingToMessage.text || 'Attachment'
+      }
+      : null;
+    sendMessage(activeChat.id, inputText, replyTo)
+      .then(() => {
+        setInputText('');
+        setReplyingToMessage(null);
+      })
       .catch((error) => {
         console.error('Unable to send message.', error);
         showToast(`Couldn't send message: ${error.message}`);
       });
+  };
+
+  const handleCopyMessage = async (message) => {
+    try {
+      await navigator.clipboard.writeText(message.text || message.attachmentUrl || '');
+      showToast('Message copied.');
+    } catch (error) {
+      console.error('Unable to copy message.', error);
+      showToast(`Couldn't copy message: ${error.message}`);
+    }
+    setOpenMessageMenuId(null);
   };
 
   const handleSaveEdit = async (messageId) => {
@@ -2087,6 +2133,12 @@ const ChatView = () => {
       console.error('Unable to react to message.', error);
       showToast(`Couldn't add reaction: ${error.message}`);
     }
+  };
+
+  const handleReplyToMessage = (message) => {
+    setReplyingToMessage(message);
+    setOpenMessageMenuId(null);
+    messageInputRef.current?.focus();
   };
 
   const handleForwardMessage = async (targetChatId) => {
@@ -2473,12 +2525,20 @@ const ChatView = () => {
                       <div className={`chat-message-content space-y-1 ${isMe ? 'ml-auto' : 'mr-auto'}`}>
                       
                       {/* Bubble */}
-                      <div className={`relative rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed shadow-[0_1px_1px_rgba(11,20,26,0.12)] [overflow-wrap:anywhere] ${isMe ? 'chat-message-outgoing rounded-br-md' : 'chat-message-incoming rounded-bl-md border border-black/[0.04] dark:border-white/[0.04]'} ${isHighlighted ? 'chat-message-highlighted' : ''}`}>
+                      <div className={`chat-message-bubble ${msg.type === 'image' ? '' : 'chat-message-bubble-with-menu'} relative rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed shadow-[0_1px_1px_rgba(11,20,26,0.12)] [overflow-wrap:anywhere] ${isMe ? 'chat-message-outgoing rounded-br-md' : 'chat-message-incoming rounded-bl-md border border-black/[0.04] dark:border-white/[0.04]'} ${isHighlighted ? 'chat-message-highlighted' : ''}`}>
                         
                         {isGroup && !isMe && (
                           <p className="mb-1 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
                             {users.find(profile => profile.id === msg.senderId)?.name || 'Group member'}
                           </p>
+                        )}
+                        {msg.replyTo && (
+                          <div className="mb-2 rounded-lg border-l-2 border-violet-500 bg-black/5 px-2.5 py-1.5 text-xs dark:bg-white/10">
+                            <p className="font-semibold text-violet-700 dark:text-violet-300">
+                              {users.find(profile => profile.id === msg.replyTo.senderId)?.name || 'Reply'}
+                            </p>
+                            <p className="mt-0.5 line-clamp-2 opacity-75">{msg.replyTo.text}</p>
+                          </div>
                         )}
                         {msg.forwardedFrom && (
                           <p className="mb-2 flex items-center gap-1 text-xs italic opacity-75">
@@ -2543,7 +2603,8 @@ const ChatView = () => {
                                   size={14}
                                   aria-label={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
                                   title={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
-                                  className={msg.readBy?.some(uid => uid !== user.id) ? 'text-sky-300' : 'text-white'}
+                                  className={msg.readBy?.some(uid => uid !== user.id) ? 'text-violet-700' : 'text-white'}
+                                  style={msg.readBy?.some(uid => uid !== user.id) ? { color: 'rgb(109 40 217)' } : undefined}
                                 />
                               )}
                             </div>
@@ -2639,34 +2700,169 @@ const ChatView = () => {
                                 aria-label={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
                                 title={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
                                 className={msg.readBy?.some(uid => uid !== user.id)
-                                  ? 'text-sky-300'
+                                  ? 'text-violet-700'
                                   : 'text-slate-500/80 dark:text-white/60'}
+                                style={msg.readBy?.some(uid => uid !== user.id)
+                                  ? { color: 'rgb(109 40 217)' }
+                                  : undefined}
                               />
                             )}
                           </div>
                         )}
                       </div>
 
-                      {/* Action icons on hover */}
-                      <div className={`chat-message-actions flex flex-wrap items-center gap-1 px-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
-                        <div className="relative">
+                      <div className="chat-message-actions flex items-center">
+                        <div className="relative" data-message-actions={msg.id}>
                           <button
                             type="button"
-                            title="React to message"
-                            aria-label="React to message"
-                            aria-expanded={reactionPickerMessageId === msg.id}
-                            aria-controls={`reaction-picker-${msg.id}`}
-                            onClick={() => setReactionPickerMessageId(current => current === msg.id ? null : msg.id)}
-                            className="flex h-9 min-w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-violet-50 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 dark:text-slate-400 dark:hover:bg-violet-950 dark:hover:text-violet-300"
+                            title="Open message actions"
+                            aria-label="Open message actions"
+                            aria-haspopup="menu"
+                            aria-expanded={openMessageMenuId === msg.id}
+                            onClick={() => setOpenMessageMenuId(current => current === msg.id ? null : msg.id)}
+                            className={`chat-message-action-button chat-message-dropdown-trigger ${openMessageMenuId === msg.id ? 'is-open' : ''}`}
                           >
-                            <Smile size={16} />
+                            <ChevronDown size={14} />
                           </button>
+                          {openMessageMenuId === msg.id && (
+                            <div
+                              role="menu"
+                              aria-label="Message actions"
+                              className={`chat-message-menu ${isMe ? 'right-0' : 'left-0'} ${index >= activeChat.messages.length - 2 ? 'bottom-full mb-2' : 'top-full mt-2'}`}
+                            >
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => handleReplyToMessage(msg)}
+                                className="chat-message-menu-item"
+                              >
+                                <MessageCircle size={16} /> Reply
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => handleCopyMessage(msg)}
+                                className="chat-message-menu-item"
+                              >
+                                <Copy size={16} /> Copy
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setReactionPickerMessageId(msg.id);
+                                  setOpenMessageMenuId(null);
+                                }}
+                                className="chat-message-menu-item"
+                              >
+                                <Smile size={16} /> React
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setForwardingMessage(msg);
+                                  setOpenMessageMenuId(null);
+                                }}
+                                className="chat-message-menu-item"
+                              >
+                                <Send size={16} /> Forward
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  toggleSaveMessage(msg);
+                                  setOpenMessageMenuId(null);
+                                }}
+                                className="chat-message-menu-item"
+                              >
+                                <Bookmark size={16} /> Star message
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                aria-pressed={isHighlighted}
+                                onClick={() => {
+                                  handleMessageHighlight(messageKey);
+                                  setOpenMessageMenuId(null);
+                                }}
+                                className="chat-message-menu-item"
+                              >
+                                <Highlighter size={16} /> {isHighlighted ? 'Remove highlight' : 'Highlight'}
+                              </button>
+                              {isMe && msg.type === 'text' && editingMessageId !== msg.id && (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => {
+                                    setEditingMessageId(msg.id);
+                                    setEditingText(msg.text);
+                                    setOpenMessageMenuId(null);
+                                  }}
+                                  className="chat-message-menu-item"
+                                >
+                                  <Pencil size={16} /> Edit
+                                </button>
+                              )}
+                              <div className="chat-message-menu-divider" />
+                              {deleteOptionsMessageId === msg.id ? (
+                                <>
+                                  {isMe && (
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      onClick={() => {
+                                        handleDeleteMessage(msg.id, 'everyone');
+                                        setOpenMessageMenuId(null);
+                                      }}
+                                      className="chat-message-menu-item text-rose-600 dark:text-rose-400"
+                                    >
+                                      <Trash2 size={16} /> Delete for everyone
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    onClick={() => {
+                                      handleDeleteMessage(msg.id, 'me');
+                                      setOpenMessageMenuId(null);
+                                    }}
+                                    className="chat-message-menu-item text-rose-600 dark:text-rose-400"
+                                  >
+                                    <Trash2 size={16} /> Delete for me
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  onClick={() => setDeleteOptionsMessageId(msg.id)}
+                                  className="chat-message-menu-item text-rose-600 dark:text-rose-400"
+                                >
+                                  <Trash2 size={16} /> Delete
+                                </button>
+                              )}
+                              <div className="chat-message-menu-divider" />
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setOpenMessageMenuId(null);
+                                  setDeleteOptionsMessageId(null);
+                                }}
+                                className="chat-message-menu-item"
+                              >
+                                <X size={16} /> Cancel
+                              </button>
+                            </div>
+                          )}
                           {reactionPickerMessageId === msg.id && (
                             <div
                               id={`reaction-picker-${msg.id}`}
                               role="group"
                               aria-label="Choose a message reaction"
-                              className={`absolute bottom-full z-30 mb-2 grid w-max max-w-[calc(100vw-2rem)] grid-cols-4 gap-1 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl dark:border-slate-700 dark:bg-slate-900 ${isMe ? 'right-0' : 'left-0'}`}
+                              className={`chat-message-reaction-picker ${isMe ? 'right-0' : 'left-0'} ${index >= activeChat.messages.length - 2 ? 'bottom-full mb-2' : 'top-full mt-2'}`}
                             >
                               {MESSAGE_REACTIONS.map(emoji => (
                                 <button
@@ -2674,90 +2870,11 @@ const ChatView = () => {
                                   type="button"
                                   onClick={() => handleReaction(msg.id, emoji)}
                                   aria-label={`React with ${emoji}`}
-                                  className="flex h-10 w-10 items-center justify-center rounded-lg text-xl transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 dark:hover:bg-slate-800"
+                                  className="chat-message-reaction-option"
                                 >
                                   {emoji}
                                 </button>
                               ))}
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          title="Forward message"
-                          aria-label="Forward message"
-                          onClick={() => setForwardingMessage(msg)}
-                          className="flex h-9 min-w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-violet-50 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 dark:text-slate-400 dark:hover:bg-violet-950 dark:hover:text-violet-300"
-                        >
-                          <Send size={14} />
-                        </button>
-                        <button
-                          type="button"
-                          title="Save message"
-                          aria-label="Save message"
-                          onClick={() => toggleSaveMessage(msg)}
-                          className="flex h-9 min-w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-amber-50 hover:text-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 dark:text-slate-400 dark:hover:bg-amber-950"
-                        >⭐</button>
-                        <button
-                          type="button"
-                          title={isHighlighted ? 'Remove message highlight' : 'Highlight message'}
-                          aria-label={isHighlighted ? 'Remove message highlight' : 'Highlight message'}
-                          aria-pressed={isHighlighted}
-                          onClick={() => handleMessageHighlight(messageKey)}
-                          className={`flex h-9 min-w-9 items-center justify-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${isHighlighted ? 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300' : 'text-slate-500 hover:bg-amber-50 hover:text-amber-600 dark:text-slate-400 dark:hover:bg-amber-950'}`}
-                        >
-                          <Highlighter size={16} />
-                        </button>
-                        {isMe && msg.type === 'text' && editingMessageId !== msg.id && (
-                          <button
-                            type="button"
-                            title="Edit message"
-                            aria-label="Edit message"
-                            onClick={() => {
-                              setEditingMessageId(msg.id);
-                              setEditingText(msg.text);
-                            }}
-                            className="flex h-9 min-w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-violet-50 hover:text-violet-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 dark:text-slate-400 dark:hover:bg-violet-950"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                        )}
-                        <div className="relative">
-                          <button
-                            type="button"
-                            title="Delete message"
-                            aria-label="Delete message"
-                            aria-expanded={deleteOptionsMessageId === msg.id}
-                            onClick={() => setDeleteOptionsMessageId(current => current === msg.id ? null : msg.id)}
-                            className="flex h-9 min-w-9 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 dark:text-slate-400 dark:hover:bg-rose-950"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                          {deleteOptionsMessageId === msg.id && (
-                            <div className="absolute bottom-full right-0 z-20 mb-2 w-48 rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-                              {isMe && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteMessage(msg.id, 'everyone')}
-                                  className="block w-full rounded-lg px-3 py-2 text-left text-sm text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                                >
-                                  Delete for everyone
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteMessage(msg.id, 'me')}
-                                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
-                              >
-                                Delete for me
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setDeleteOptionsMessageId(null)}
-                                className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
-                              >
-                                Cancel
-                              </button>
                             </div>
                           )}
                         </div>
@@ -2793,6 +2910,26 @@ const ChatView = () => {
 
             {/* Input Bar */}
             <div className="chat-theme-composer shrink-0 border-t border-slate-200/80 p-3 dark:border-slate-700/80">
+              {replyingToMessage && (
+                <div className="mx-auto mb-2 flex max-w-5xl items-center justify-between rounded-xl border-l-2 border-violet-500 bg-white/70 px-3 py-2 dark:bg-slate-900/60">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-violet-700 dark:text-violet-300">
+                      Replying to {users.find(profile => profile.id === replyingToMessage.senderId)?.name || 'message'}
+                    </p>
+                    <p className="truncate text-xs text-slate-600 dark:text-slate-300">
+                      {replyingToMessage.text || 'Attachment'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setReplyingToMessage(null)}
+                    aria-label="Cancel reply"
+                    className="ml-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              )}
               <form onSubmit={handleSend} className="mx-auto flex max-w-5xl items-center gap-2 sm:gap-3">
                 <input
                   ref={fileInputRef}
@@ -2813,6 +2950,7 @@ const ChatView = () => {
                   <div className="flex items-center">
                   <Smile size={20} className="text-slate-400 mr-2 shrink-0" />
                   <input
+                  ref={messageInputRef}
                   disabled={isUploading || isRecording}
                     type="text"
                     value={inputText}
