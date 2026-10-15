@@ -415,7 +415,8 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly([
             'senderId', 'text', 'type', 'createdAt',
               'attachmentUrl', 'cloudinaryPublicId', 'cloudinaryResourceType',
-              'fileName', 'mimeType', 'fileSize', 'duration', 'forwardedFrom', 'readBy'
+              'fileName', 'mimeType', 'fileSize', 'duration', 'forwardedFrom', 'readBy',
+              'attachments'
           ])
           && request.resource.data.senderId == request.auth.uid
           && request.resource.data.readBy is list
@@ -429,6 +430,17 @@ service cloud.firestore {
             || (
               request.resource.data.forwardedFrom is string
               && request.resource.data.forwardedFrom.size() <= 120
+            )
+          )
+          && (
+            !request.resource.data.keys().hasAny(['attachments'])
+            || (
+              request.resource.data.type == 'image'
+              && request.resource.data.attachments is list
+              && request.resource.data.attachments.size() > 0
+              && request.resource.data.attachments.size() <= 10
+              && request.resource.data.attachments[0] == request.resource.data.attachmentUrl
+              && request.resource.data.attachments[0].matches('https://res.cloudinary.com/.*')
             )
           )
           && request.resource.data.createdAt == request.time

@@ -210,6 +210,14 @@ const getMessageDateLabel = (date) => {
   yesterday.setDate(yesterday.getDate() - 1);
   if (date.toDateString() === today.toDateString()) return 'Today';
   if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  const todayStart = new Date(today);
+  const messageStart = new Date(date);
+  todayStart.setHours(0, 0, 0, 0);
+  messageStart.setHours(0, 0, 0, 0);
+  const daysAgo = Math.round((todayStart - messageStart) / (24 * 60 * 60 * 1000));
+  if (daysAgo > 1 && daysAgo < 7) {
+    return new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(date);
+  }
   return new Intl.DateTimeFormat(undefined, {
     month: 'numeric',
     day: 'numeric',
@@ -1156,43 +1164,67 @@ const DataProvider = ({ children }) => {
   };
 
   const sendAttachment = async (chatId, file, type, duration = null) => {
-    if (!user?.uid || !file) throw new Error('You must be signed in to send an attachment.');
-    if (file.size <= 0 || file.size > 50 * 1024 * 1024) {
-      throw new Error('Attachments must be smaller than 50 MB.');
+    const files = (Array.isArray(file) ? file : [file]).filter(Boolean);
+    if (!user?.uid || files.length === 0) throw new Error('You must be signed in to send an attachment.');
+    if (files.length > 1 && type !== 'image') {
+      throw new Error('Select multiple images only when sending more than one file.');
+    }
+    if (files.length > 10) throw new Error('You can send up to 10 photos in one message.');
+    if (files.some(item => item.size <= 0 || item.size > 50 * 1024 * 1024)) {
+      throw new Error('Each attachment must be smaller than 50 MB.');
+    }
+    if (files.reduce((total, item) => total + item.size, 0) > 50 * 1024 * 1024) {
+      throw new Error('Photos selected together must total 50 MB or less.');
     }
 
     const chatRef = doc(db, 'chats', chatId);
     const messageRef = doc(collection(db, 'chats', chatId, 'messages'));
-    const safeFileName = file.name.replace(/[\\/]/g, '_').slice(0, 180) || `${type}-attachment`;
-    const mimeType = getAttachmentMimeType(file);
-    if (
-      (type === 'image' && !mimeType.startsWith('image/')) ||
-      (type === 'video' && !mimeType.startsWith('video/')) ||
-      (type === 'voice' && !mimeType.startsWith('audio/')) ||
-      (type === 'document' && !SUPPORTED_DOCUMENT_MIME_TYPES.includes(mimeType))
-    ) {
-      throw new Error('Choose a supported image, video, audio recording, PDF, Office document, RTF or text file.');
-    }
-    const uploadedFile = await uploadToCloudinary(file, {
-      chatId,
-      messageId: messageRef.id,
-      type
+    const validatedFiles = files.map(item => {
+      const safeFileName = item.name.replace(/[\\/]/g, '_').slice(0, 180) || `${type}-attachment`;
+      const mimeType = getAttachmentMimeType(item);
+      if (
+        (type === 'image' && !mimeType.startsWith('image/')) ||
+        (type === 'video' && !mimeType.startsWith('video/')) ||
+        (type === 'voice' && !mimeType.startsWith('audio/')) ||
+        (type === 'document' && !SUPPORTED_DOCUMENT_MIME_TYPES.includes(mimeType))
+      ) {
+        throw new Error('Choose a supported image, video, audio recording, PDF, Office document, RTF or text file.');
+      }
+      return { file: item, safeFileName, mimeType };
     });
-    const label = type === 'voice' ? 'Voice note' : `${type[0].toUpperCase()}${type.slice(1)}: ${safeFileName}`;
+    const uploadedFiles = await Promise.all(validatedFiles.map(({ file: item }, index) =>
+      uploadToCloudinary(item, {
+        chatId,
+        messageId: `${messageRef.id}-${index + 1}`,
+        type
+      })
+    ));
+    const label = type === 'voice'
+      ? 'Voice note'
+      : type === 'image'
+        ? `${files.length} ${files.length === 1 ? 'photo' : 'photos'}`
+        : type === 'video'
+          ? 'Video'
+          : 'Document';
     const batch = writeBatch(db);
+    const [firstFile] = validatedFiles;
+    const [firstUpload] = uploadedFiles;
     const messageData = {
       senderId: user.uid,
       text: label,
       type,
-      attachmentUrl: uploadedFile.secureUrl,
-      cloudinaryPublicId: uploadedFile.publicId,
-      cloudinaryResourceType: uploadedFile.resourceType,
-      fileName: safeFileName,
-      mimeType,
-      fileSize: uploadedFile.bytes || file.size,
+      attachmentUrl: firstUpload.secureUrl,
+      cloudinaryPublicId: firstUpload.publicId,
+      cloudinaryResourceType: firstUpload.resourceType,
+      fileName: firstFile.safeFileName,
+      mimeType: firstFile.mimeType,
+      fileSize: firstUpload.bytes || firstFile.file.size,
       readBy: [user.uid],
       createdAt: serverTimestamp()
     };
+    if (type === 'image') {
+      messageData.attachments = uploadedFiles.map(image => image.secureUrl);
+    }
     if (duration !== null) messageData.duration = duration;
 
     batch.set(messageRef, messageData);
@@ -1867,7 +1899,6 @@ const ChatView = () => {
   const activeChatId = routeParams.chatId || null;
   const [inputText, setInputText] = useState('');
   const [showTranslation, setShowTranslation] = useState({});
-  const [currentChatDate, setCurrentChatDate] = useState('');
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editingText, setEditingText] = useState('');
   const [deleteOptionsMessageId, setDeleteOptionsMessageId] = useState(null);
@@ -1908,7 +1939,6 @@ const ChatView = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const messagesEndRef = useRef(null);
-  const messageListRef = useRef(null);
   const fileInputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const recordingStartedAtRef = useRef(0);
@@ -1916,11 +1946,6 @@ const ChatView = () => {
   const activeChat = chats.find(c => c.id === activeChatId);
   const isGroup = activeChat?.isGroup;
   const activeTheme = chatThemes[activeChatId] || 'amethyst';
-  const latestChatDate = [...(activeChat?.messages || [])]
-    .reverse()
-    .map(message => getMessageDate(message.createdAt))
-    .find(Boolean);
-  const displayedChatDate = currentChatDate || (latestChatDate ? getMessageDateLabel(latestChatDate) : '');
   const visibleChats = chats.filter(chat => Boolean(chat.isGroup) === isGroupsRoute);
   const otherUser = !isGroup ? users.find(u => activeChat?.participants.includes(u.id) && u.id !== user.id) : null;
 
@@ -1957,41 +1982,6 @@ const ChatView = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activeChat?.messages]);
-
-  useEffect(() => {
-    const messageList = messageListRef.current;
-    if (!messageList) return undefined;
-
-    const updateCurrentDate = () => {
-      const datedMessages = [...messageList.querySelectorAll('[data-chat-date]')];
-      if (datedMessages.length === 0) {
-        setCurrentChatDate('');
-        return;
-      }
-
-      const threshold = messageList.getBoundingClientRect().top + 40;
-      let currentMessage = datedMessages[0];
-      datedMessages.some(message => {
-        if (message.getBoundingClientRect().top > threshold) return true;
-        currentMessage = message;
-        return false;
-      });
-      setCurrentChatDate(currentMessage.dataset.chatDate || '');
-    };
-
-    let frameId = window.requestAnimationFrame(updateCurrentDate);
-    const onScroll = () => {
-      window.cancelAnimationFrame(frameId);
-      frameId = window.requestAnimationFrame(updateCurrentDate);
-    };
-    messageList.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('resize', onScroll);
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      messageList.removeEventListener('scroll', onScroll);
-      window.removeEventListener('resize', onScroll);
-    };
-  }, [activeChatId, activeChat?.messages]);
 
   useEffect(() => {
     if (!reactionPickerMessageId) return undefined;
@@ -2155,11 +2145,11 @@ const ChatView = () => {
   };
 
   const handleAttachmentSelected = async (event) => {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files || []);
     event.target.value = '';
-    if (!file || !activeChat) return;
+    if (files.length === 0 || !activeChat) return;
 
-    const mimeType = getAttachmentMimeType(file);
+    const mimeType = getAttachmentMimeType(files[0]);
     const type = mimeType.startsWith('image/')
       ? 'image'
       : mimeType.startsWith('video/')
@@ -2167,7 +2157,7 @@ const ChatView = () => {
         : 'document';
     setIsUploading(true);
     try {
-      await sendAttachment(activeChat.id, file, type);
+      await sendAttachment(activeChat.id, files.length === 1 ? files[0] : files, type);
     } catch (error) {
       console.error('Unable to upload attachment.', error);
       showToast(`Couldn't send file: ${error.message}`);
@@ -2445,16 +2435,21 @@ const ChatView = () => {
             </div>
 
             {/* Messages Scroll Area */}
-            <div ref={messageListRef} className="chat-wallpaper min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-6 sm:py-6">
-              {displayedChatDate && (
-                <div className="chat-date-sticky" aria-live="polite">
-                  <time>{displayedChatDate}</time>
-                </div>
-              )}
+            <div className="chat-wallpaper min-h-0 flex-1 overflow-y-auto px-3 py-5 sm:px-6 sm:py-6">
               <div className="mx-auto max-w-5xl space-y-3.5">
-              {activeChat.messages.map((msg) => {
+              {activeChat.messages.map((msg, index) => {
                 const messageDate = getMessageDate(msg.createdAt);
+                const previousDate = getMessageDate(activeChat.messages[index - 1]?.createdAt);
+                const showDateSeparator = messageDate &&
+                  (!previousDate || messageDate.toDateString() !== previousDate.toDateString());
                 const isMe = msg.senderId === user.id;
+                const imageAttachments = msg.type === 'image'
+                  ? (Array.isArray(msg.attachments) && msg.attachments.length > 0
+                    ? msg.attachments.map(attachment => typeof attachment === 'string'
+                      ? attachment
+                      : attachment.attachmentUrl)
+                    : [msg.attachmentUrl])
+                  : [];
                 const messageKey = `${activeChat.id}:${msg.id}`;
                 const isHighlighted = highlightedMessages.includes(messageKey);
                 const reactionCounts = Object.values(msg.reactions || {}).reduce((counts, emoji) => ({
@@ -2464,9 +2459,16 @@ const ChatView = () => {
 
                 return (
                   <Fragment key={msg.id}>
+                    {showDateSeparator && (
+                      <div
+                        className="chat-date-separator"
+                        role="separator"
+                      >
+                        <time dateTime={messageDate.toISOString()}>{getMessageDateLabel(messageDate)}</time>
+                      </div>
+                    )}
                     <div
                       className={`group flex ${isMe ? 'justify-end' : 'justify-start'}`}
-                      data-chat-date={messageDate ? getMessageDateLabel(messageDate) : undefined}
                     >
                       <div className={`chat-message-content space-y-1 ${isMe ? 'ml-auto' : 'mr-auto'}`}>
                       
@@ -2516,11 +2518,35 @@ const ChatView = () => {
                             </div>
                           </div>
                         ) : msg.type === 'image' ? (
-                          <div className="space-y-2">
-                            {msg.text && <p>{msg.text}</p>}
-                            <a href={msg.attachmentUrl} target="_blank" rel="noreferrer">
-                              <img src={msg.attachmentUrl} alt={msg.fileName || 'Shared image'} className="max-h-80 max-w-full rounded-xl object-contain" />
-                            </a>
+                          <div className={`chat-image-gallery ${imageAttachments.length === 1 ? 'chat-image-gallery-single' : ''} ${imageAttachments.length === 2 ? 'chat-image-gallery-pair' : ''}`}>
+                            {imageAttachments.slice(0, 4).map((image, imageIndex) => (
+                              <a
+                                key={image}
+                                href={image}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label={`Open photo ${imageIndex + 1}`}
+                                className="chat-image-tile"
+                              >
+                                <img src={image} alt={`Shared photo ${imageIndex + 1}`} />
+                                {imageIndex === 3 && imageAttachments.length > 4 && (
+                                  <span className="chat-image-overflow">
+                                    +{imageAttachments.length - 4}
+                                  </span>
+                                )}
+                              </a>
+                            ))}
+                            <div className="chat-image-meta">
+                              <time className="opacity-90">{msg.timestamp}</time>
+                              {isMe && (
+                                <CheckCheck
+                                  size={14}
+                                  aria-label={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
+                                  title={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
+                                  className={msg.readBy?.some(uid => uid !== user.id) ? 'text-sky-300' : 'text-white'}
+                                />
+                              )}
+                            </div>
                           </div>
                         ) : msg.type === 'video' ? (
                           <div className="space-y-2">
@@ -2603,20 +2629,22 @@ const ChatView = () => {
                           </div>
                         )}
 
-                        <div className="chat-message-meta">
-                          {msg.editedAt && <span className="opacity-80">Edited</span>}
-                          <time className="opacity-80">{msg.timestamp}</time>
-                          {isMe && (
-                            <CheckCheck
-                              size={14}
-                              aria-label={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
-                              title={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
-                              className={msg.readBy?.some(uid => uid !== user.id)
-                                ? 'text-sky-300'
-                                : 'text-slate-500/80 dark:text-white/60'}
-                            />
-                          )}
-                        </div>
+                        {msg.type === 'image' ? null : (
+                          <div className="chat-message-meta">
+                            {msg.editedAt && <span className="opacity-80">Edited</span>}
+                            <time className="opacity-80">{msg.timestamp}</time>
+                            {isMe && (
+                              <CheckCheck
+                                size={14}
+                                aria-label={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
+                                title={msg.readBy?.some(uid => uid !== user.id) ? 'Seen' : 'Sent'}
+                                className={msg.readBy?.some(uid => uid !== user.id)
+                                  ? 'text-sky-300'
+                                  : 'text-slate-500/80 dark:text-white/60'}
+                              />
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {/* Action icons on hover */}
@@ -2769,6 +2797,7 @@ const ChatView = () => {
                 <input
                   ref={fileInputRef}
                   type="file"
+                  multiple
                   accept="image/*,video/*,.pdf,.doc,.docx,.txt,.rtf,.odt,.xls,.xlsx,.ppt,.pptx"
                   onChange={handleAttachmentSelected}
                   className="hidden"
