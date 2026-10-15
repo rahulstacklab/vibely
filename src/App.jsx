@@ -34,6 +34,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { auth, db, firebaseConfigured } from './firebase.js';
+import { createPortal } from 'react-dom';
 import { uploadToCloudinary } from './services/uploadService.js';
 import {
   Home, MessageCircle, Users, User, Settings, Shield, Search, Plus, Copy, UserPlus, Crown,
@@ -195,7 +196,13 @@ const AuthContext = createContext();
 const RouterContext = createContext();
 const DataContext = createContext();
 let localAuthPersistencePromise;
-const MESSAGE_REACTIONS = ['❤️', '😂', '😮', '😢', '🙏', '👍', '🔥', '🎉'];
+const MESSAGE_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+const MORE_MESSAGE_REACTIONS = [
+  '😀', '😁', '😆', '🤣', '😊', '😍', '🥰', '😘', '😎', '🤔', '🙄', '😴',
+  '😭', '😡', '🥳', '🤗', '🤩', '😇', '🤝', '👏', '🙌', '💪', '🫶', '💯',
+  '🔥', '🎉', '✨', '💖', '💕', '💔', '✅', '❌', '👀', '💐', '🤦', '🤷',
+  '🍰', '☕', '🌹', '⭐', '🤍', '🫡', '😋', '😜', '🥺', '🤯', '😬'
+];
 const getMessageDate = (createdAt) => {
   const date = typeof createdAt?.toDate === 'function'
     ? createdAt.toDate()
@@ -1907,6 +1914,8 @@ const ChatView = () => {
   const [editingText, setEditingText] = useState('');
   const [deleteOptionsMessageId, setDeleteOptionsMessageId] = useState(null);
   const [reactionPickerMessageId, setReactionPickerMessageId] = useState(null);
+  const [reactionPickerAnchor, setReactionPickerAnchor] = useState(null);
+  const [isExpandedReactionPicker, setIsExpandedReactionPicker] = useState(false);
   const [forwardingMessage, setForwardingMessage] = useState(null);
   const [isForwarding, setIsForwarding] = useState(false);
   const [showChatOptions, setShowChatOptions] = useState(false);
@@ -1951,6 +1960,26 @@ const ChatView = () => {
   const activeChat = chats.find(c => c.id === activeChatId);
   const isGroup = activeChat?.isGroup;
   const activeTheme = chatThemes[activeChatId] || 'amethyst';
+  const reactionPickerPosition = reactionPickerAnchor
+    ? (() => {
+      const width = Math.min(320, window.innerWidth - 16);
+      const height = isExpandedReactionPicker
+        ? Math.min(360, window.innerHeight - 16)
+        : 52;
+      const left = Math.max(
+        8,
+        Math.min(
+          reactionPickerAnchor.left + reactionPickerAnchor.width / 2 - width / 2,
+          window.innerWidth - width - 8
+        )
+      );
+      const above = reactionPickerAnchor.top - height - 8 >= 8;
+      const top = above
+        ? reactionPickerAnchor.top - height - 8
+        : Math.max(8, Math.min(reactionPickerAnchor.bottom + 8, window.innerHeight - height - 8));
+      return { left, top, width };
+    })()
+    : null;
   const visibleChats = chats.filter(chat => Boolean(chat.isGroup) === isGroupsRoute);
   const otherUser = !isGroup ? users.find(u => activeChat?.participants.includes(u.id) && u.id !== user.id) : null;
 
@@ -1990,11 +2019,41 @@ const ChatView = () => {
 
   useEffect(() => {
     if (!reactionPickerMessageId) return undefined;
-    const closeOnEscape = (event) => {
-      if (event.key === 'Escape') setReactionPickerMessageId(null);
+    const closePicker = (event) => {
+      if (event.type === 'keydown' && event.key === 'Escape') {
+        setReactionPickerMessageId(null);
+        setReactionPickerAnchor(null);
+        setIsExpandedReactionPicker(false);
+        return;
+      }
+      if (event.type === 'pointerdown' &&
+        !event.target.closest('[data-reaction-picker]') &&
+        !event.target.closest('[data-reaction-trigger]')) {
+        setReactionPickerMessageId(null);
+        setReactionPickerAnchor(null);
+        setIsExpandedReactionPicker(false);
+      }
+      if (event.type === 'scroll') {
+        setReactionPickerMessageId(null);
+        setReactionPickerAnchor(null);
+        setIsExpandedReactionPicker(false);
+      }
+      if (event.type === 'resize') {
+        setReactionPickerMessageId(null);
+        setReactionPickerAnchor(null);
+        setIsExpandedReactionPicker(false);
+      }
     };
-    window.addEventListener('keydown', closeOnEscape);
-    return () => window.removeEventListener('keydown', closeOnEscape);
+    window.addEventListener('keydown', closePicker);
+    window.addEventListener('resize', closePicker);
+    document.addEventListener('pointerdown', closePicker);
+    document.addEventListener('scroll', closePicker, true);
+    return () => {
+      window.removeEventListener('keydown', closePicker);
+      window.removeEventListener('resize', closePicker);
+      document.removeEventListener('pointerdown', closePicker);
+      document.removeEventListener('scroll', closePicker, true);
+    };
   }, [reactionPickerMessageId]);
 
   useEffect(() => {
@@ -2126,13 +2185,30 @@ const ChatView = () => {
   };
 
   const handleReaction = async (messageId, emoji) => {
+    setReactionPickerMessageId(null);
+    setReactionPickerAnchor(null);
+    setIsExpandedReactionPicker(false);
     try {
       await addReaction(activeChat.id, messageId, emoji);
-      setReactionPickerMessageId(null);
     } catch (error) {
       console.error('Unable to react to message.', error);
       showToast(`Couldn't add reaction: ${error.message}`);
     }
+  };
+
+  const handleOpenReactionPicker = (messageId, event) => {
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setReactionPickerMessageId(messageId);
+    setReactionPickerAnchor({
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      width: rect.width
+    });
+    setIsExpandedReactionPicker(false);
+    setOpenMessageMenuId(null);
   };
 
   const handleReplyToMessage = (message) => {
@@ -2711,6 +2787,18 @@ const ChatView = () => {
                         )}
                       </div>
 
+                      <button
+                        type="button"
+                        data-reaction-trigger={msg.id}
+                        aria-label="React to message"
+                        aria-haspopup="dialog"
+                        aria-expanded={reactionPickerMessageId === msg.id}
+                        onClick={event => handleOpenReactionPicker(msg.id, event)}
+                        className={`chat-reaction-trigger ${isMe ? 'chat-reaction-trigger-outgoing' : 'chat-reaction-trigger-incoming'} ${reactionPickerMessageId === msg.id ? 'is-open' : ''}`}
+                      >
+                        <Smile size={19} />
+                      </button>
+
                       <div className="chat-message-actions flex items-center">
                         <div className="relative" data-message-actions={msg.id}>
                           <button
@@ -2749,10 +2837,7 @@ const ChatView = () => {
                               <button
                                 type="button"
                                 role="menuitem"
-                                onClick={() => {
-                                  setReactionPickerMessageId(msg.id);
-                                  setOpenMessageMenuId(null);
-                                }}
+                                onClick={event => handleOpenReactionPicker(msg.id, event)}
                                 className="chat-message-menu-item"
                               >
                                 <Smile size={16} /> React
@@ -2857,26 +2942,6 @@ const ChatView = () => {
                               </button>
                             </div>
                           )}
-                          {reactionPickerMessageId === msg.id && (
-                            <div
-                              id={`reaction-picker-${msg.id}`}
-                              role="group"
-                              aria-label="Choose a message reaction"
-                              className={`chat-message-reaction-picker ${isMe ? 'right-0' : 'left-0'} ${index >= activeChat.messages.length - 2 ? 'bottom-full mb-2' : 'top-full mt-2'}`}
-                            >
-                              {MESSAGE_REACTIONS.map(emoji => (
-                                <button
-                                  key={emoji}
-                                  type="button"
-                                  onClick={() => handleReaction(msg.id, emoji)}
-                                  aria-label={`React with ${emoji}`}
-                                  className="chat-message-reaction-option"
-                                >
-                                  {emoji}
-                                </button>
-                              ))}
-                            </div>
-                          )}
                         </div>
                       </div>
                       {Object.keys(msg.reactions || {}).length > 0 && (
@@ -2901,6 +2966,60 @@ const ChatView = () => {
 
                       </div>
                     </div>
+                    {reactionPickerMessageId === msg.id && reactionPickerAnchor && reactionPickerPosition && createPortal(
+                      <div
+                        data-reaction-picker
+                        role="dialog"
+                        aria-label="Choose a message reaction"
+                        className={`chat-reaction-picker ${isExpandedReactionPicker ? 'chat-reaction-picker-expanded' : ''}`}
+                        style={{
+                          left: `${reactionPickerPosition.left}px`,
+                          top: `${reactionPickerPosition.top}px`,
+                          width: `${reactionPickerPosition.width}px`
+                        }}
+                        onPointerDown={event => event.stopPropagation()}
+                        onClick={event => event.stopPropagation()}
+                      >
+                        <div className="chat-reaction-picker-quick">
+                          {MESSAGE_REACTIONS.map(emoji => (
+                            <button
+                              key={emoji}
+                              type="button"
+                              onClick={() => handleReaction(msg.id, emoji)}
+                              aria-label={`React with ${emoji}`}
+                              className="chat-reaction-picker-emoji"
+                            >
+                              {emoji}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            aria-label={isExpandedReactionPicker ? 'Close full emoji picker' : 'Show more emojis'}
+                            aria-expanded={isExpandedReactionPicker}
+                            onClick={() => setIsExpandedReactionPicker(expanded => !expanded)}
+                            className="chat-reaction-picker-more"
+                          >
+                            {isExpandedReactionPicker ? <X size={16} /> : <Plus size={16} />}
+                          </button>
+                        </div>
+                        {isExpandedReactionPicker && (
+                          <div className="chat-reaction-picker-full" aria-label="More emojis">
+                            {MORE_MESSAGE_REACTIONS.map(emoji => (
+                              <button
+                                key={emoji}
+                                type="button"
+                                onClick={() => handleReaction(msg.id, emoji)}
+                                aria-label={`React with ${emoji}`}
+                                className="chat-reaction-picker-emoji"
+                              >
+                                {emoji}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>,
+                      document.body
+                    )}
                   </Fragment>
                 );
               })}
